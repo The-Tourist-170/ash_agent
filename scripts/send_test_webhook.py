@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Send a signed GitHub workflow_run payload to a running ash-agent instance.
+"""Send a signed GitHub webhook payload to a running ash-agent instance.
 
 Examples:
     uv run python scripts/send_test_webhook.py
+
+    uv run python scripts/send_test_webhook.py --event issues --issue-number 7
 
     uv run python scripts/send_test_webhook.py \
         --repo octo/demo --conclusion failure --branch main
@@ -26,6 +28,9 @@ from urllib import error, request
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
+WORKFLOW_CONCLUSIONS = ["failure", "timed_out", "startup_failure", "success", "cancelled"]
+ISSUE_ACTIONS = ["opened", "reopened", "closed", "edited"]
+
 
 def load_dotenv(path: Path) -> dict[str, str]:
     values: dict[str, str] = {}
@@ -40,7 +45,7 @@ def load_dotenv(path: Path) -> dict[str, str]:
     return values
 
 
-def build_payload(
+def build_workflow_payload(
     repository: str,
     commit_sha: str,
     branch: str,
@@ -57,6 +62,26 @@ def build_payload(
             "head_sha": commit_sha,
             "conclusion": conclusion,
             "html_url": f"https://github.com/{repository}/actions/runs/{workflow_run_id}",
+        },
+    }
+
+
+def build_issue_payload(
+    repository: str,
+    branch: str,
+    action: str,
+    issue_number: int,
+    title: str,
+    body: str,
+) -> dict:
+    return {
+        "action": action,
+        "repository": {"full_name": repository, "default_branch": branch},
+        "issue": {
+            "number": issue_number,
+            "title": title,
+            "body": body,
+            "html_url": f"https://github.com/{repository}/issues/{issue_number}",
         },
     }
 
@@ -78,27 +103,74 @@ def parse_args() -> argparse.Namespace:
         help="Webhook endpoint URL",
     )
     parser.add_argument("--secret", default=secret_default, help="Webhook HMAC secret")
-    parser.add_argument("--repo", default="octo/demo", help="owner/name")
-    parser.add_argument("--sha", default="b" * 40, help="Commit SHA to pin the run to")
+    parser.add_argument("--repo", default="The-Tourist-170/dummy_project", help="owner/name")
     parser.add_argument("--branch", default="main", help="Branch name")
+    parser.add_argument(
+        "--event",
+        default="workflow_run",
+        choices=["workflow_run", "issues"],
+        help="GitHub event type",
+    )
+    parser.add_argument("--sha", default="b" * 40, help="Commit SHA (workflow_run only)")
     parser.add_argument(
         "--conclusion",
         default="failure",
-        choices=["failure", "timed_out", "startup_failure", "success", "cancelled"],
-        help="Workflow conclusion",
+        choices=WORKFLOW_CONCLUSIONS,
+        help="Workflow conclusion (workflow_run only)",
+    )
+    parser.add_argument(
+        "--workflow-run-id",
+        type=int,
+        default=123456789,
+        help="Numeric workflow run id (workflow_run only)",
+    )
+    parser.add_argument(
+        "--action",
+        default="opened",
+        choices=ISSUE_ACTIONS,
+        help="Issue action (issues only)",
+    )
+    parser.add_argument(
+        "--issue-number",
+        type=int,
+        default=7,
+        help="Issue number (issues only)",
+    )
+    parser.add_argument(
+        "--issue-title",
+        default="[BUG] Calculate tax after applying the discount",
+        help="Issue title (issues only)",
+    )
+    parser.add_argument(
+        "--issue-body",
+        default="Totals differ by one cent when a discount is applied.",
+        help="Issue body (issues only)",
     )
     parser.add_argument(
         "--delivery-id",
         default=None,
         help="X-GitHub-Delivery value (default: random UUID)",
     )
-    parser.add_argument(
-        "--workflow-run-id",
-        type=int,
-        default=123456789,
-        help="Numeric workflow run id",
-    )
     return parser.parse_args()
+
+
+def build_payload(args: argparse.Namespace) -> dict:
+    if args.event == "issues":
+        return build_issue_payload(
+            args.repo,
+            args.branch,
+            args.action,
+            args.issue_number,
+            args.issue_title,
+            args.issue_body,
+        )
+    return build_workflow_payload(
+        args.repo,
+        args.sha,
+        args.branch,
+        args.conclusion,
+        args.workflow_run_id,
+    )
 
 
 def main() -> int:
@@ -107,7 +179,7 @@ def main() -> int:
         print("error: webhook secret is empty (set GITHUB_WEBHOOK_SECRET in .env)", file=sys.stderr)
         return 2
 
-    payload = build_payload(args.repo, args.sha, args.branch, args.conclusion, args.workflow_run_id)
+    payload = build_payload(args)
     body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
     delivery_id = args.delivery_id or str(uuid.uuid4())
 
@@ -119,7 +191,7 @@ def main() -> int:
             "Content-Type": "application/json",
             "X-Hub-Signature-256": sign(args.secret, body),
             "X-GitHub-Delivery": delivery_id,
-            "X-GitHub-Event": "workflow_run",
+            "X-GitHub-Event": args.event,
         },
     )
 
@@ -135,6 +207,7 @@ def main() -> int:
         print("is the API running? try: uv run ash-agent", file=sys.stderr)
         return 1
 
+    print(f"event:    {args.event}")
     print(f"delivery: {delivery_id}")
     print(f"status:   {status_code}")
     print(f"response: {response_body}")

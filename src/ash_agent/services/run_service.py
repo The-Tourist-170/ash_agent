@@ -5,7 +5,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ash_agent.persistence.models import Run, RunStatus, WebhookDelivery
-from ash_agent.services.webhook_service import FailureContext
+from ash_agent.services.webhook_service import RepairContext
 
 
 async def store_delivery(
@@ -41,18 +41,22 @@ async def store_delivery(
 async def create_run(
     session: AsyncSession,
     delivery: WebhookDelivery,
-    context: FailureContext,
+    context: RepairContext,
     *,
     max_attempts: int,
 ) -> Run:
     run = Run(
         delivery_id=delivery.delivery_id,
+        source=context.source,
         repository=context.repository,
         ref=context.ref,
         commit_sha=context.commit_sha,
         workflow_name=context.workflow_name,
         workflow_run_id=context.workflow_run_id,
         run_url=context.run_url,
+        issue_number=context.issue_number,
+        issue_title=context.issue_title,
+        issue_body=context.issue_body,
         status=RunStatus.PENDING.value,
         max_attempts=max_attempts,
     )

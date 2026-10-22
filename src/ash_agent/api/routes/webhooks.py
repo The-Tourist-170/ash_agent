@@ -9,7 +9,7 @@ from ash_agent.api.schemas.webhooks import WebhookAck
 from ash_agent.persistence.models import DeliveryStatus, RunStatus
 from ash_agent.queue.jobs import process_run
 from ash_agent.services.run_service import create_run, store_delivery
-from ash_agent.services.webhook_service import extract_failure_context, verify_github_signature
+from ash_agent.services.webhook_service import extract_repair_context, verify_github_signature
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
@@ -76,7 +76,7 @@ async def github_webhook(
             detail="delivery already processed",
         )
 
-    context = extract_failure_context(event_type, payload)
+    context = extract_repair_context(event_type, payload)
     if context is None:
         delivery.status = DeliveryStatus.IGNORED.value
         await session.commit()
@@ -114,11 +114,12 @@ async def github_webhook(
     delivery.status = DeliveryStatus.ENQUEUED.value
     await session.commit()
 
+    subject = context.commit_sha[:12] if context.commit_sha else f"issue #{context.issue_number}"
     logger.info(
-        "accepted delivery %s for %s@%s as run %s",
+        "accepted delivery %s for %s (%s) as run %s",
         delivery_id,
         context.repository,
-        context.commit_sha[:12],
+        subject,
         run.id,
     )
     return WebhookAck(status="accepted", delivery_id=delivery_id, run_id=run.id)

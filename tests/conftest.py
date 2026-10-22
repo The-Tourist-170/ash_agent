@@ -10,7 +10,6 @@ import pytest_asyncio
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from redis import Redis
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from ash_agent.config import Settings
@@ -41,6 +40,7 @@ def test_settings() -> Settings:
 async def db_engine(test_settings: Settings) -> AsyncIterator[AsyncEngine]:
     engine = create_async_engine(test_settings.database_url)
     async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.drop_all)
         await connection.run_sync(Base.metadata.create_all)
     yield engine
     await engine.dispose()
@@ -48,10 +48,6 @@ async def db_engine(test_settings: Settings) -> AsyncIterator[AsyncEngine]:
 
 @pytest_asyncio.fixture(autouse=True)
 async def clean_state(db_engine: AsyncEngine) -> AsyncIterator[None]:
-    async with db_engine.begin() as connection:
-        await connection.execute(
-            text("TRUNCATE TABLE runs, webhook_deliveries RESTART IDENTITY CASCADE")
-        )
     redis = Redis.from_url(TEST_VALKEY_URL)
     redis.flushdb()
     redis.close()
@@ -88,6 +84,25 @@ def workflow_run_payload(conclusion: str = "failure") -> dict:
             "head_sha": "a" * 40,
             "conclusion": conclusion,
             "html_url": "https://github.com/octo/demo/actions/runs/123456789",
+        },
+    }
+
+
+def issue_payload(
+    action: str = "opened",
+    number: int = 6,
+    title: str = "[BUG] Calculate tax after applying the discount",
+    body: str = "Totals differ by one cent when a discount is applied.",
+) -> dict:
+    repository = "The-Tourist-170/dummy_project"
+    return {
+        "action": action,
+        "repository": {"full_name": repository, "default_branch": "main"},
+        "issue": {
+            "number": number,
+            "title": title,
+            "body": body,
+            "html_url": f"https://github.com/{repository}/issues/{number}",
         },
     }
 

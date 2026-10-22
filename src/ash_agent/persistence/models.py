@@ -23,6 +23,11 @@ class RunStatus(StrEnum):
     ESCALATED = "escalated"
 
 
+class RunSource(StrEnum):
+    WORKFLOW_RUN = "workflow_run"
+    ISSUE = "issue"
+
+
 class Base(DeclarativeBase):
     pass
 
@@ -56,12 +61,18 @@ class Run(Base):
         unique=True,
         index=True,
     )
+    source: Mapped[str] = mapped_column(
+        String(32), nullable=False, default=RunSource.WORKFLOW_RUN.value, index=True
+    )
     repository: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     ref: Mapped[str | None] = mapped_column(String(255))
-    commit_sha: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    commit_sha: Mapped[str | None] = mapped_column(String(40), index=True)
     workflow_name: Mapped[str | None] = mapped_column(String(255))
     workflow_run_id: Mapped[int | None] = mapped_column(BigInteger)
     run_url: Mapped[str | None] = mapped_column(String(512))
+    issue_number: Mapped[int | None] = mapped_column(BigInteger, index=True)
+    issue_title: Mapped[str | None] = mapped_column(String(512))
+    issue_body: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(
         String(32), nullable=False, default=RunStatus.PENDING.value, index=True
     )

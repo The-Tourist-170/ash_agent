@@ -7,6 +7,7 @@ from ash_agent.persistence.models import DeliveryStatus, Run, RunStatus, Webhook
 from tests.conftest import (
     TEST_QUEUE_NAME,
     TEST_VALKEY_URL,
+    issue_payload,
     post_webhook,
     sign,
     webhook_headers,
@@ -48,6 +49,7 @@ class TestGithubWebhook:
         assert delivery is not None
         assert delivery.status == DeliveryStatus.ENQUEUED.value
         assert run is not None
+        assert run.source == "workflow_run"
         assert run.status == RunStatus.QUEUED.value
         assert run.commit_sha == "a" * 40
         assert run.rq_job_id == f"run-{run.id}"
@@ -98,3 +100,47 @@ class TestGithubWebhook:
         response = await client.post("/webhooks/github", content=body, headers=headers)
 
         assert response.status_code == 400
+
+    async def test_accepts_opened_issue_and_enqueues_job(
+        self, client, db_engine: AsyncEngine
+    ) -> None:
+        status_code, body = await post_webhook(client, issue_payload(), event="issues")
+
+        assert status_code == 202
+        assert body["status"] == "accepted"
+
+        session_factory = async_sessionmaker(db_engine, expire_on_commit=False)
+        async with session_factory() as session:
+            run = await session.scalar(select(Run))
+
+        assert run is not None
+        assert run.source == "issue"
+        assert run.repository == "The-Tourist-170/dummy_project"
+        assert run.issue_number == 6
+        assert run.issue_title.startswith("[BUG]")
+        assert run.commit_sha is None
+        assert run.ref == "main"
+        assert run.status == RunStatus.QUEUED.value
+        assert queue_length() == 1
+
+    async def test_closed_issue_is_ignored(self, client, db_engine: AsyncEngine) -> None:
+        status_code, body = await post_webhook(
+            client, issue_payload(action="closed"), event="issues"
+        )
+
+        assert status_code == 202
+        assert body["status"] == "ignored"
+        assert await counts(db_engine) == (1, 0)
+        assert queue_length() == 0
+
+    async def test_pull_request_issue_event_is_ignored(
+        self, client, db_engine: AsyncEngine
+    ) -> None:
+        payload = issue_payload()
+        payload["issue"]["pull_request"] = {"url": "https://api.github.com/pulls/1"}
+
+        status_code, body = await post_webhook(client, payload, event="issues")
+
+        assert status_code == 202
+        assert body["status"] == "ignored"
+        assert await counts(db_engine) == (1, 0)

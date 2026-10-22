@@ -44,9 +44,12 @@ API docs: http://localhost:8000/docs
 
 ## Testing with a real GitHub repository
 
-Phase 1 reacts to **`workflow_run` events that completed with a failing conclusion**
-(`failure`, `timed_out`, `startup_failure`). Issue events are stored and ignored; issue-driven
-repair belongs to a later phase.
+Phase 1 reacts to two kinds of GitHub events:
+
+- **`workflow_run`** completed with a failing conclusion (`failure`, `timed_out`, `startup_failure`)
+- **`issues`** with action `opened` or `reopened` (pull requests are ignored)
+
+Every other event is stored and marked `ignored`.
 
 1. Add a CI workflow to your repository. For `The-Tourist-170/dummy_project`, copy
    [`examples/github-actions-ci.yml`](examples/github-actions-ci.yml) to
@@ -62,15 +65,20 @@ repair belongs to a later phase.
    - Payload URL: `https://<random>.trycloudflare.com/webhooks/github`
    - Content type: `application/json`
    - Secret: the value of `GITHUB_WEBHOOK_SECRET` from `.env`
-   - Events: **Workflow runs** (or "Send me everything")
-5. Push a commit or re-run the workflow. When it fails, GitHub shows a `202` delivery and a
-   JSON body like `{"status":"accepted","delivery_id":"...","run_id":"..."}`.
+   - Events: **Workflow runs** + **Issues** (or "Send me everything")
+5. Trigger it by pushing a failing commit, re-running the workflow, or opening an issue.
+   GitHub shows a `202` delivery and a JSON body like
+   `{"status":"accepted","delivery_id":"...","run_id":"..."}`.
 6. Inspect it: `curl -s http://localhost:8000/runs | python -m json.tool`.
 
-You can also send a signed event without GitHub:
+You can also send signed events without GitHub:
 
 ```bash
-uv run python scripts/send_test_webhook.py --repo The-Tourist-170/dummy_project
+# failing workflow
+uv run python scripts/send_test_webhook.py
+
+# newly opened issue
+uv run python scripts/send_test_webhook.py --event issues --issue-number 7
 ```
 
 Quick-tunnel URLs change every time `cloudflared` restarts, so update the webhook URL when you

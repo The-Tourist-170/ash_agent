@@ -23,9 +23,16 @@ class Settings(BaseSettings):
 
     github_webhook_secret: SecretStr = SecretStr("")
     max_attempts: int = 3
+    mock_repair_success_attempt: int = 1
+    job_max_retries: int = 2
+    graph_recursion_limit: int = 50
 
     api_host: str = "0.0.0.0"
     api_port: int = 8000
+
+    @property
+    def checkpoint_dsn(self) -> str:
+        return self.database_url.replace("+asyncpg", "")
 
 
 @lru_cache

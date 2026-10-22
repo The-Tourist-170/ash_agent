@@ -12,8 +12,9 @@ from httpx import ASGITransport, AsyncClient
 from redis import Redis
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
-from ash_agent.config import Settings
+from ash_agent.config import Settings, get_settings
 from ash_agent.main import create_app
+from ash_agent.persistence.checkpoints import setup_checkpointer
 from ash_agent.persistence.models import Base
 
 TEST_DATABASE_URL = os.getenv(
@@ -51,6 +52,22 @@ async def clean_state(db_engine: AsyncEngine) -> AsyncIterator[None]:
     redis = Redis.from_url(TEST_VALKEY_URL)
     redis.flushdb()
     redis.close()
+    yield
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def configure_runtime_settings(monkeypatch) -> AsyncIterator[None]:
+    monkeypatch.setenv("DATABASE_URL", TEST_DATABASE_URL)
+    monkeypatch.setenv("VALKEY_URL", TEST_VALKEY_URL)
+    monkeypatch.setenv("RQ_QUEUE_NAME", TEST_QUEUE_NAME)
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def checkpoint_schema(test_settings: Settings) -> AsyncIterator[None]:
+    await setup_checkpointer(test_settings)
     yield
 
 

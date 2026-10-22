@@ -84,6 +84,31 @@ uv run python scripts/send_test_webhook.py --event issues --issue-number 7
 Quick-tunnel URLs change every time `cloudflared` restarts, so update the webhook URL when you
 restart it.
 
+## Agent workflow
+
+The worker executes a LangGraph state machine for every run:
+
+```text
+ingest → diagnose → retrieve → reproduce → plan → patch → validate
+                                                       ├─ passed            → publish   (passed)
+                                                       ├─ failed, budget    → reflect → plan
+                                                       └─ budget exhausted → escalate  (escalated)
+```
+
+Phase 2 nodes are deterministic mocks. Retrieval, patching and validation are replaced with real
+implementations in later phases.
+
+Checkpoints use `AsyncPostgresSaver`, so the graph state is written to PostgreSQL after every
+node. A worker restart or RQ retry re-invokes the graph with the same `thread_id` (the run id)
+and resumes from the last completed node. The worker creates the checkpoint schema on startup.
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `MAX_ATTEMPTS` | 3 | Maximum patch attempts before escalation |
+| `MOCK_REPAIR_SUCCESS_ATTEMPT` | 1 | Mock validation passes on this attempt (`99` = always escalate) |
+| `JOB_MAX_RETRIES` | 2 | RQ retries for transient worker failures |
+| `GRAPH_RECURSION_LIMIT` | 50 | LangGraph safety limit |
+
 ## Development
 
 ```bash
@@ -98,4 +123,5 @@ ports. Override with `TEST_DATABASE_URL` and `TEST_VALKEY_URL`.
 ## Status
 
 - Phase 1: foundation, infrastructure, webhook gateway, RQ worker — complete
-- Phase 2 onward: see `NOTES.md`
+- Phase 2: LangGraph workflow, PostgreSQL checkpoints, bounded retries and resumption — complete
+- Phase 3 onward: see `NOTES.md`

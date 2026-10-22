@@ -3,6 +3,7 @@ import json
 import logging
 
 from fastapi import APIRouter, HTTPException, Request, status
+from rq import Retry
 
 from ash_agent.api.dependencies import QueueDep, SessionDep, SettingsDep
 from ash_agent.api.schemas.webhooks import WebhookAck
@@ -95,6 +96,10 @@ async def github_webhook(
             str(run.id),
             job_id=f"run-{run.id}",
             job_timeout=settings.run_job_timeout_seconds,
+            retry=Retry(
+                max=settings.job_max_retries,
+                interval=[10, 30, 60][: settings.job_max_retries],
+            ),
         )
     except Exception as exc:
         message = f"enqueue failed: {type(exc).__name__}"[:1000]

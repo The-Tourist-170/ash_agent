@@ -1,19 +1,37 @@
-import json
-import logging
+from __future__ import annotations
+
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Protocol
 
 import httpx
-
-logger = logging.getLogger(__name__)
+from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_openai import ChatOpenAI
+from pydantic import BaseModel, Field
 
 
 class LLMError(RuntimeError):
     pass
 
 
-class JSONLLM(Protocol):
-    async def complete_json(self, system_prompt: str, user_prompt: str) -> dict[str, Any]: ...
+class Diagnosis(BaseModel):
+    root_cause: str = Field(description="Most likely root cause of the failure.")
+    suspected_files: list[str] = Field(
+        default_factory=list,
+        description="Repository-relative files that should be inspected.",
+    )
+    plan: str = Field(description="Concrete repair plan.")
+
+
+class DiagnosisLLM(Protocol):
+    async def diagnose(self, system_prompt: str, user_prompt: str) -> Diagnosis: ...
+
+
+class _StripAuthorization(httpx.Auth):
+    """Remove the SDK's bearer header for endpoints that reject any auth."""
+
+    def auth_flow(self, request: httpx.Request):
+        request.headers.pop("Authorization", None)
+        yield request
 
 
 @dataclass(frozen=True)
@@ -21,73 +39,42 @@ class OpenAICompatibleClient:
     base_url: str
     model: str
     api_key: str = ""
-    timeout_seconds: float = 30.0
+    timeout_seconds: float = 60.0
+
+    async def diagnose(self, system_prompt: str, user_prompt: str) -> Diagnosis:
+        auth = None if self.api_key else _StripAuthorization()
+        http_client = httpx.AsyncClient(auth=auth, timeout=self.timeout_seconds)
+        try:
+            model = ChatOpenAI(
+                model=self.model,
+                base_url=self.base_url_with_v1,
+                api_key=self.api_key or "unused",
+                http_async_client=http_client,
+                temperature=0,
+                timeout=self.timeout_seconds,
+                max_retries=0,
+            )
+            structured = model.with_structured_output(Diagnosis, method="function_calling")
+            result = await structured.ainvoke(
+                [
+                    SystemMessage(content=system_prompt),
+                    HumanMessage(content=user_prompt),
+                ]
+            )
+        except Exception as exc:
+            raise LLMError(f"LLM request failed: {type(exc).__name__}") from exc
+        finally:
+            await http_client.aclose()
+
+        if isinstance(result, dict):
+            result = Diagnosis.model_validate(result)
+        if not isinstance(result, Diagnosis):
+            raise LLMError("LLM returned no structured diagnosis")
+        return result
 
     @property
-    def endpoint(self) -> str:
+    def base_url_with_v1(self) -> str:
         base = self.base_url.rstrip("/")
         if base.endswith("/v1"):
-            return f"{base}/chat/completions"
-        return f"{base}/v1/chat/completions"
-
-    async def complete_json(self, system_prompt: str, user_prompt: str) -> dict[str, Any]:
-        headers = {"Content-Type": "application/json"}
-        if self.api_key:
-            headers["Authorization"] = f"Bearer {self.api_key}"
-
-        payload = {
-            "model": self.model,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            "temperature": 0,
-        }
-
-        try:
-            async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
-                response = await client.post(self.endpoint, json=payload, headers=headers)
-        except httpx.HTTPError as exc:
-            raise LLMError(f"LLM request failed: {type(exc).__name__}") from exc
-
-        if response.status_code >= 400:
-            detail = response.text[:300].replace("\n", " ")
-            raise LLMError(f"LLM returned HTTP {response.status_code}: {detail}")
-
-        content = _extract_content(response.json())
-        return parse_json_object(content)
-
-
-def _extract_content(body: dict[str, Any]) -> str:
-    try:
-        content = body["choices"][0]["message"]["content"]
-    except (KeyError, IndexError, TypeError) as exc:
-        raise LLMError("LLM response did not contain message content") from exc
-    if not isinstance(content, str) or not content.strip():
-        raise LLMError("LLM returned empty content")
-    return content
-
-
-def parse_json_object(content: str) -> dict[str, Any]:
-    text = content.strip()
-    if text.startswith("```"):
-        text = text.strip("`")
-        if text.startswith("json"):
-            text = text[4:]
-        text = text.strip()
-
-    try:
-        value = json.loads(text)
-    except json.JSONDecodeError:
-        start = text.find("{")
-        end = text.rfind("}")
-        if start == -1 or end <= start:
-            raise LLMError("LLM response was not valid JSON") from None
-        try:
-            value = json.loads(text[start : end + 1])
-        except json.JSONDecodeError as exc:
-            raise LLMError("LLM response was not valid JSON") from exc
-
-    if not isinstance(value, dict):
-        raise LLMError("LLM response must be a JSON object")
-    return value
+            return base
+        return f"{base}/v1"

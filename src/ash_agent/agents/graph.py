@@ -13,7 +13,7 @@ from ash_agent.agents.nodes.retrieve import retrieve
 from ash_agent.agents.nodes.validate import make_validate_node
 from ash_agent.agents.routing import route_after_validation
 from ash_agent.agents.state import AgentState
-from ash_agent.integrations.llm import JSONLLM
+from ash_agent.integrations.llm import DiagnosisLLM
 
 
 def build_graph(
@@ -21,7 +21,7 @@ def build_graph(
     success_on_attempt: int = 1,
     checkpointer: BaseCheckpointSaver | None = None,
     interrupt_after: list[str] | None = None,
-    llm_client: JSONLLM | None = None,
+    llm_client: DiagnosisLLM | None = None,
 ):
     diagnose_node = make_llm_diagnose_node(llm_client) if llm_client else diagnose
     builder = StateGraph(AgentState)

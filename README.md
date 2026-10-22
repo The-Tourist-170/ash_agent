@@ -11,6 +11,7 @@ the LangGraph diagnosis/repair loop and open an annotated pull request.
 | FastAPI | Webhook gateway, run API, health checks |
 | RQ + Valkey | Background job queue and worker |
 | PostgreSQL | Source of truth for deliveries, runs, checkpoints |
+| LangChain + ChatOpenAI | Structured diagnosis over an OpenAI-compatible endpoint |
 | Neo4j | Code relationship graph (Phase 3) |
 | Qdrant | Semantic code/log retrieval (Phase 3) |
 | Mem0 | Verified repair lessons (Phase 6) |
@@ -114,10 +115,13 @@ and resumes from the last completed node. The worker creates the checkpoint sche
 
 ### LLM diagnosis
 
-When `LLM_BASE_URL` and `LLM_MODEL` are set, the `diagnose` node calls
-`POST /v1/chat/completions` and stores the returned `root_cause`, `suspected_files` and `plan` in
-the graph state. If the call fails or returns unusable JSON, the node falls back to the
-deterministic mock so the workflow still completes.
+When `LLM_BASE_URL` and `LLM_MODEL` are set, the `diagnose` node uses LangChain's `ChatOpenAI`
+with `with_structured_output(Diagnosis, method="function_calling")` and stores the returned
+`root_cause`, `suspected_files` and `plan` in the graph state. The endpoint needs no key: when
+`LLM_API_KEY` is empty, a small `httpx` auth shim removes the SDK's `Authorization` header because
+this proxy rejects any bearer token. `method="function_calling"` is required here — the endpoint
+did not honor `json_schema` or `json_mode` structured output. If the call fails or returns unusable
+data, the node falls back to the deterministic mock so the workflow still completes.
 
 ```bash
 uv run python scripts/check_llm.py

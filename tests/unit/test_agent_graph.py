@@ -1,6 +1,7 @@
 import pytest
 
 from ash_agent.agents.graph import build_graph
+from ash_agent.integrations.llm import Diagnosis
 
 
 def base_state(**overrides) -> dict:
@@ -21,12 +22,12 @@ def base_state(**overrides) -> dict:
 
 
 class FakeLLM:
-    async def complete_json(self, system_prompt: str, user_prompt: str) -> dict:
-        return {
-            "root_cause": "tax is applied before the discount",
-            "suspected_files": ["src/dummy_project/core.py"],
-            "plan": "apply discount before tax in calculate_total",
-        }
+    async def diagnose(self, system_prompt: str, user_prompt: str) -> Diagnosis:
+        return Diagnosis(
+            root_cause="tax is applied before the discount",
+            suspected_files=["src/dummy_project/core.py"],
+            plan="apply discount before tax in calculate_total",
+        )
 
 
 class TestAgentGraph:

@@ -1,15 +1,14 @@
 import logging
 
 from ash_agent.agents.state import AgentState
-from ash_agent.integrations.llm import JSONLLM, LLMError
+from ash_agent.integrations.llm import DiagnosisLLM, LLMError
 
 logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = (
     "You are a senior software engineer diagnosing a failing repository. "
-    "Respond with a single JSON object only, no markdown. The object must have: "
-    "root_cause (string), suspected_files (array of repository-relative paths), "
-    "plan (string). Keep each value short and concrete."
+    "Identify the most likely root cause, the files that need inspection, and a concrete repair "
+    "plan. Be concise and specific; do not invent file contents."
 )
 
 
@@ -26,14 +25,14 @@ def build_user_prompt(state: AgentState) -> str:
         f"Repository: {state.get('repository')}\n"
         f"Branch: {state.get('ref') or 'unknown'}\n"
         f"{trigger}\n\n"
-        "Return JSON with root_cause, suspected_files and plan."
+        "Diagnose this failure."
     )
 
 
-def make_llm_diagnose_node(client: JSONLLM):
+def make_llm_diagnose_node(client: DiagnosisLLM):
     async def diagnose_with_llm(state: AgentState) -> dict:
         try:
-            data = await client.complete_json(SYSTEM_PROMPT, build_user_prompt(state))
+            diagnosis = await client.diagnose(SYSTEM_PROMPT, build_user_prompt(state))
         except LLMError as exc:
             logger.warning("LLM diagnosis failed, using mock fallback: %s", exc)
             return _mock_fallback(state)
@@ -41,7 +40,7 @@ def make_llm_diagnose_node(client: JSONLLM):
             logger.warning("LLM diagnosis failed, using mock fallback: %s", type(exc).__name__)
             return _mock_fallback(state)
 
-        root_cause = str(data.get("root_cause") or "").strip()
+        root_cause = diagnosis.root_cause.strip()
         if not root_cause:
             return _mock_fallback(state)
 
@@ -49,17 +48,11 @@ def make_llm_diagnose_node(client: JSONLLM):
             "root_cause": root_cause,
             "status": "diagnosing",
         }
-        suspected_files = data.get("suspected_files")
-        if isinstance(suspected_files, list):
-            files = [str(path).strip() for path in suspected_files if str(path).strip()]
-            if files:
-                update["suspected_files"] = files
+        files = [path.strip() for path in diagnosis.suspected_files if path.strip()]
+        if files:
+            update["suspected_files"] = files
 
-        plan_value = data.get("plan")
-        if isinstance(plan_value, list):
-            plan = "; ".join(str(item).strip() for item in plan_value if str(item).strip())
-        else:
-            plan = str(plan_value or "").strip()
+        plan = diagnosis.plan.strip()
         if plan:
             update["plan"] = plan
 

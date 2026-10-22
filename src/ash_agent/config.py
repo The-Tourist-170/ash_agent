@@ -27,12 +27,21 @@ class Settings(BaseSettings):
     job_max_retries: int = 2
     graph_recursion_limit: int = 50
 
+    llm_base_url: str | None = None
+    llm_model: str | None = None
+    llm_api_key: SecretStr = SecretStr("")
+    llm_timeout_seconds: float = 60.0
+
     api_host: str = "0.0.0.0"
     api_port: int = 8000
 
     @property
     def checkpoint_dsn(self) -> str:
         return self.database_url.replace("+asyncpg", "")
+
+    @property
+    def llm_configured(self) -> bool:
+        return bool((self.llm_base_url or "").strip() and (self.llm_model or "").strip())
 
 
 @lru_cache

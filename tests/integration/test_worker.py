@@ -28,6 +28,8 @@ def run_worker_burst() -> subprocess.CompletedProcess[str]:
             "DATABASE_URL": TEST_DATABASE_URL,
             "VALKEY_URL": TEST_VALKEY_URL,
             "RQ_QUEUE_NAME": TEST_QUEUE_NAME,
+            "LLM_BASE_URL": "",
+            "LLM_MODEL": "",
         }
     )
     return subprocess.run(

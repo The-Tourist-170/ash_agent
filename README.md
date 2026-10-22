@@ -108,6 +108,26 @@ and resumes from the last completed node. The worker creates the checkpoint sche
 | `MOCK_REPAIR_SUCCESS_ATTEMPT` | 1 | Mock validation passes on this attempt (`99` = always escalate) |
 | `JOB_MAX_RETRIES` | 2 | RQ retries for transient worker failures |
 | `GRAPH_RECURSION_LIMIT` | 50 | LangGraph safety limit |
+| `LLM_BASE_URL` | unset | OpenAI-compatible endpoint (e.g. `http://127.0.0.1:55990`) |
+| `LLM_MODEL` | unset | Model id exposed by that endpoint |
+| `LLM_API_KEY` | empty | Optional bearer token; leave empty when the endpoint needs none |
+
+### LLM diagnosis
+
+When `LLM_BASE_URL` and `LLM_MODEL` are set, the `diagnose` node calls
+`POST /v1/chat/completions` and stores the returned `root_cause`, `suspected_files` and `plan` in
+the graph state. If the call fails or returns unusable JSON, the node falls back to the
+deterministic mock so the workflow still completes.
+
+```bash
+uv run python scripts/check_llm.py
+```
+
+Patching and validation remain deterministic mocks in Phase 2.
+
+On macOS the worker uses RQ's `SimpleWorker` (jobs run in-process) because RQ's forked child can
+hit Objective-C fork-safety crashes; Linux keeps the standard forked `Worker`. The worker also
+runs RQ's scheduler in-process so retries are dequeued.
 
 ## Development
 

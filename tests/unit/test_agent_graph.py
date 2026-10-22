@@ -20,6 +20,15 @@ def base_state(**overrides) -> dict:
     return state
 
 
+class FakeLLM:
+    async def complete_json(self, system_prompt: str, user_prompt: str) -> dict:
+        return {
+            "root_cause": "tax is applied before the discount",
+            "suspected_files": ["src/dummy_project/core.py"],
+            "plan": "apply discount before tax in calculate_total",
+        }
+
+
 class TestAgentGraph:
     async def test_passes_on_first_attempt(self) -> None:
         result = await build_graph(success_on_attempt=1).ainvoke(base_state())
@@ -67,3 +76,11 @@ class TestAgentGraph:
     async def test_ingest_rejects_incomplete_state(self) -> None:
         with pytest.raises(ValueError, match="run_id and repository"):
             await build_graph().ainvoke({"run_id": "only-id"})
+
+    async def test_graph_uses_llm_diagnosis_and_plan(self) -> None:
+        result = await build_graph(success_on_attempt=1, llm_client=FakeLLM()).ainvoke(base_state())
+
+        assert result["root_cause"] == "tax is applied before the discount"
+        assert result["suspected_files"] == ["src/dummy_project/core.py"]
+        assert result["plan"] == "apply discount before tax in calculate_total"
+        assert result["status"] == "passed"

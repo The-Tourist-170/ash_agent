@@ -1,7 +1,7 @@
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 
-from ash_agent.agents.nodes.diagnose import diagnose
+from ash_agent.agents.nodes.diagnose import diagnose, make_llm_diagnose_node
 from ash_agent.agents.nodes.escalate import escalate
 from ash_agent.agents.nodes.ingest import ingest
 from ash_agent.agents.nodes.patch import patch
@@ -13,6 +13,7 @@ from ash_agent.agents.nodes.retrieve import retrieve
 from ash_agent.agents.nodes.validate import make_validate_node
 from ash_agent.agents.routing import route_after_validation
 from ash_agent.agents.state import AgentState
+from ash_agent.integrations.llm import JSONLLM
 
 
 def build_graph(
@@ -20,10 +21,12 @@ def build_graph(
     success_on_attempt: int = 1,
     checkpointer: BaseCheckpointSaver | None = None,
     interrupt_after: list[str] | None = None,
+    llm_client: JSONLLM | None = None,
 ):
+    diagnose_node = make_llm_diagnose_node(llm_client) if llm_client else diagnose
     builder = StateGraph(AgentState)
     builder.add_node("ingest", ingest)
-    builder.add_node("diagnose", diagnose)
+    builder.add_node("diagnose", diagnose_node)
     builder.add_node("retrieve", retrieve)
     builder.add_node("reproduce", reproduce)
     builder.add_node("plan", plan)

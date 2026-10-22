@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ash_agent.agents.graph import build_graph
 from ash_agent.agents.state import AgentState
 from ash_agent.config import get_settings
+from ash_agent.integrations import build_llm_client
 from ash_agent.persistence.checkpoints import open_checkpointer
 from ash_agent.persistence.models import Run, RunStatus
 from ash_agent.persistence.postgres import Database
@@ -67,9 +68,16 @@ async def _process_run(run_id: str) -> None:
                 logger.info("run %s claimed by worker", run_id)
 
         async with open_checkpointer(settings) as saver:
+            llm_client = build_llm_client(settings)
             graph = build_graph(
                 success_on_attempt=settings.mock_repair_success_attempt,
                 checkpointer=saver,
+                llm_client=llm_client,
+            )
+            logger.info(
+                "run %s using %s diagnosis",
+                run_id,
+                "LLM" if llm_client is not None else "mock",
             )
             config = {
                 "configurable": {"thread_id": run_id},

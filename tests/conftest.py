@@ -34,6 +34,8 @@ def test_settings() -> Settings:
         rq_queue_name=TEST_QUEUE_NAME,
         github_webhook_secret=WEBHOOK_SECRET,
         log_level="WARNING",
+        llm_base_url=None,
+        llm_model=None,
     )
 
 
@@ -60,6 +62,8 @@ async def configure_runtime_settings(monkeypatch) -> AsyncIterator[None]:
     monkeypatch.setenv("DATABASE_URL", TEST_DATABASE_URL)
     monkeypatch.setenv("VALKEY_URL", TEST_VALKEY_URL)
     monkeypatch.setenv("RQ_QUEUE_NAME", TEST_QUEUE_NAME)
+    monkeypatch.setenv("LLM_BASE_URL", "")
+    monkeypatch.setenv("LLM_MODEL", "")
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()

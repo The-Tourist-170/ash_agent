@@ -9,7 +9,7 @@ from ash_agent.agents.nodes.plan import plan
 from ash_agent.agents.nodes.publish import publish
 from ash_agent.agents.nodes.reflect import reflect
 from ash_agent.agents.nodes.reproduce import reproduce
-from ash_agent.agents.nodes.retrieve import retrieve
+from ash_agent.agents.nodes.retrieve import RetrievalBackend, make_retrieve_node
 from ash_agent.agents.nodes.validate import make_validate_node
 from ash_agent.agents.routing import route_after_validation
 from ash_agent.agents.state import AgentState
@@ -22,12 +22,14 @@ def build_graph(
     checkpointer: BaseCheckpointSaver | None = None,
     interrupt_after: list[str] | None = None,
     llm_client: DiagnosisLLM | None = None,
+    retrieval_service: RetrievalBackend | None = None,
 ):
     diagnose_node = make_llm_diagnose_node(llm_client) if llm_client else diagnose
+    retrieve_node = make_retrieve_node(retrieval_service)
     builder = StateGraph(AgentState)
     builder.add_node("ingest", ingest)
     builder.add_node("diagnose", diagnose_node)
-    builder.add_node("retrieve", retrieve)
+    builder.add_node("retrieve", retrieve_node)
     builder.add_node("reproduce", reproduce)
     builder.add_node("plan", plan)
     builder.add_node("patch", patch)

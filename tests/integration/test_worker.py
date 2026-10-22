@@ -30,8 +30,10 @@ def run_worker_burst() -> subprocess.CompletedProcess[str]:
             "RQ_QUEUE_NAME": TEST_QUEUE_NAME,
             "LLM_BASE_URL": "",
             "LLM_MODEL": "",
+            "RETRIEVAL_ENABLED": "false",
         }
     )
+    worker_class = "rq.worker.SimpleWorker" if sys.platform == "darwin" else "rq.worker.Worker"
     return subprocess.run(
         [
             sys.executable,
@@ -39,6 +41,8 @@ def run_worker_burst() -> subprocess.CompletedProcess[str]:
             "rq.cli",
             "worker",
             "--burst",
+            "--worker-class",
+            worker_class,
             "--url",
             TEST_VALKEY_URL,
             TEST_QUEUE_NAME,

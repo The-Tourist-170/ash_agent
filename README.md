@@ -12,8 +12,10 @@ the LangGraph diagnosis/repair loop and open an annotated pull request.
 | RQ + Valkey | Background job queue and worker |
 | PostgreSQL | Source of truth for deliveries, runs, checkpoints |
 | LangChain + ChatOpenAI | Structured diagnosis over an OpenAI-compatible endpoint |
+| Tree-sitter | Python symbol extraction |
 | Neo4j | Code relationship graph (Phase 3) |
 | Qdrant | Semantic code/log retrieval (Phase 3) |
+| FastEmbed | Local code-chunk embeddings |
 | Mem0 | Verified repair lessons (Phase 6) |
 
 ## Quick start
@@ -96,8 +98,8 @@ ingest → diagnose → retrieve → reproduce → plan → patch → validate
                                                        └─ budget exhausted → escalate  (escalated)
 ```
 
-Phase 2 nodes are deterministic mocks. Retrieval, patching and validation are replaced with real
-implementations in later phases.
+Diagnosis uses `ChatOpenAI`; retrieval clones and indexes the repository; patching and validation
+remain deterministic mocks until Phase 5.
 
 Checkpoints use `AsyncPostgresSaver`, so the graph state is written to PostgreSQL after every
 node. A worker restart or RQ retry re-invokes the graph with the same `thread_id` (the run id)
@@ -112,6 +114,11 @@ and resumes from the last completed node. The worker creates the checkpoint sche
 | `LLM_BASE_URL` | unset | OpenAI-compatible endpoint (e.g. `http://127.0.0.1:55990`) |
 | `LLM_MODEL` | unset | Model id exposed by that endpoint |
 | `LLM_API_KEY` | empty | Optional bearer token; leave empty when the endpoint needs none |
+| `RETRIEVAL_ENABLED` | `true` | Clone/index the repository in the `retrieve` node |
+| `WORKSPACE_DIR` | `.ash_agent/workspaces` | Cached repository checkouts |
+| `NEO4J_URI` | `bolt://localhost:7687` | Code graph database |
+| `QDRANT_URL` | `http://localhost:6333` | Vector store |
+| `EMBEDDING_PROVIDER` | `fastembed` | `fastembed` or deterministic `hash` (tests) |
 
 ### LLM diagnosis
 
@@ -127,7 +134,26 @@ data, the node falls back to the deterministic mock so the workflow still comple
 uv run python scripts/check_llm.py
 ```
 
-Patching and validation remain deterministic mocks in Phase 2.
+Patching and validation remain deterministic mocks (Phase 5).
+
+### Repository intelligence
+
+The `retrieve` node clones the repository at the run's commit (resolving `HEAD` for issue runs),
+extracts Python symbols with Tree-sitter, writes the code graph to Neo4j (`Repository`, `Commit`,
+`File`, `Symbol` plus `CONTAINS`, `DEFINES`, `IMPORTS`, `CALLS`), embeds symbol-aware chunks with
+FastEmbed, stores them in Qdrant, and fuses dense and BM25 rankings with reciprocal rank fusion.
+The resolved commit SHA, checkout path and top chunks are persisted in graph state and the SHA is
+copied to `runs.commit_sha`.
+
+Set `RETRIEVAL_ENABLED=false` to use the deterministic fallback (the test suite does this). Clones
+and the embedding model are cached under `.ash_agent/` (gitignored).
+
+```bash
+uv run python scripts/index_repository.py --query "calculate_total tax discount"
+```
+
+Expected: checkout path, resolved commit SHA, `backend: hybrid`, `core.py` / `calculate_total`
+among the top chunks, Neo4j node/edge counts, and a Qdrant point count.
 
 On macOS the worker uses RQ's `SimpleWorker` (jobs run in-process) because RQ's forked child can
 hit Objective-C fork-safety crashes; Linux keeps the standard forked `Worker`. The worker also
@@ -142,10 +168,12 @@ uv run pytest
 ```
 
 Integration tests expect Postgres (`ash_agent_test` database) and Valkey on their default
-ports. Override with `TEST_DATABASE_URL` and `TEST_VALKEY_URL`.
+ports. Override with `TEST_DATABASE_URL` and `TEST_VALKEY_URL`. The live retrieval script also
+expects Neo4j and Qdrant from `infra/compose.yaml`.
 
 ## Status
 
 - Phase 1: foundation, infrastructure, webhook gateway, RQ worker — complete
 - Phase 2: LangGraph workflow, PostgreSQL checkpoints, bounded retries and resumption — complete
-- Phase 3 onward: see `NOTES.md`
+- Phase 3: repository cloning, Tree-sitter symbols, Neo4j graph, Qdrant hybrid retrieval — complete
+- Phase 4 onward: see `NOTES.md`

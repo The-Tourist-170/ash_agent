@@ -15,3 +15,5 @@ htmlcov/
 reports/
 .commandcode/taste/
 NOTES.md
+
+.ash_agent/

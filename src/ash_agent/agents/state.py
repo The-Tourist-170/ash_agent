@@ -12,6 +12,9 @@ class AgentState(TypedDict, total=False):
     issue_body: str | None
     failure_logs: str
     suspected_files: list[str]
+    repository_path: str | None
+    retrieved_chunks: list[dict]
+    retrieval_backend: str | None
     root_cause: str | None
     reproduction_confirmed: bool
     plan: str | None

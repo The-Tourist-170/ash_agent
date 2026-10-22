@@ -2,6 +2,7 @@ import pytest
 
 from ash_agent.agents.graph import build_graph
 from ash_agent.integrations.llm import Diagnosis
+from ash_agent.services.retrieval_service import RetrievalOutcome
 
 
 def base_state(**overrides) -> dict:
@@ -27,6 +28,30 @@ class FakeLLM:
             root_cause="tax is applied before the discount",
             suspected_files=["src/dummy_project/core.py"],
             plan="apply discount before tax in calculate_total",
+        )
+
+
+class FakeRetrieval:
+    async def retrieve(self, state) -> RetrievalOutcome:
+        return RetrievalOutcome(
+            repository="The-Tourist-170/dummy_project",
+            commit_sha="c" * 40,
+            checkout_path="/tmp/dummy-project",
+            files=["calculator.py"],
+            chunks=[
+                {
+                    "path": "calculator.py",
+                    "start_line": 1,
+                    "end_line": 4,
+                    "content": "def calculate_total(): ...",
+                    "symbols": ["calculate_total"],
+                    "kind": "function",
+                    "score": 0.03,
+                    "sources": ["dense", "lexical"],
+                }
+            ],
+            backend="hybrid",
+            graph_indexed=True,
         )
 
 
@@ -84,4 +109,16 @@ class TestAgentGraph:
         assert result["root_cause"] == "tax is applied before the discount"
         assert result["suspected_files"] == ["src/dummy_project/core.py"]
         assert result["plan"] == "apply discount before tax in calculate_total"
+        assert result["status"] == "passed"
+
+    async def test_graph_uses_repository_retrieval(self) -> None:
+        result = await build_graph(success_on_attempt=1, retrieval_service=FakeRetrieval()).ainvoke(
+            base_state()
+        )
+
+        assert result["suspected_files"] == ["calculator.py"]
+        assert result["commit_sha"] == "c" * 40
+        assert result["repository_path"] == "/tmp/dummy-project"
+        assert result["retrieval_backend"] == "hybrid"
+        assert result["retrieved_chunks"][0]["path"] == "calculator.py"
         assert result["status"] == "passed"

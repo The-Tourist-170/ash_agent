@@ -36,6 +36,7 @@ def test_settings() -> Settings:
         log_level="WARNING",
         llm_base_url=None,
         llm_model=None,
+        retrieval_enabled=False,
     )
 
 
@@ -64,6 +65,7 @@ async def configure_runtime_settings(monkeypatch) -> AsyncIterator[None]:
     monkeypatch.setenv("RQ_QUEUE_NAME", TEST_QUEUE_NAME)
     monkeypatch.setenv("LLM_BASE_URL", "")
     monkeypatch.setenv("LLM_MODEL", "")
+    monkeypatch.setenv("RETRIEVAL_ENABLED", "false")
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()

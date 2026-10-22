@@ -13,6 +13,7 @@ from ash_agent.integrations import build_llm_client
 from ash_agent.persistence.checkpoints import open_checkpointer
 from ash_agent.persistence.models import Run, RunStatus
 from ash_agent.persistence.postgres import Database
+from ash_agent.services.retrieval_service import build_retrieval_service
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +34,9 @@ def initial_state(run: Run) -> AgentState:
         "issue_body": run.issue_body,
         "failure_logs": "",
         "suspected_files": [],
+        "repository_path": None,
+        "retrieved_chunks": [],
+        "retrieval_backend": None,
         "root_cause": None,
         "reproduction_confirmed": False,
         "plan": None,
@@ -69,15 +73,18 @@ async def _process_run(run_id: str) -> None:
 
         async with open_checkpointer(settings) as saver:
             llm_client = build_llm_client(settings)
+            retrieval_service = build_retrieval_service(settings)
             graph = build_graph(
                 success_on_attempt=settings.mock_repair_success_attempt,
                 checkpointer=saver,
                 llm_client=llm_client,
+                retrieval_service=retrieval_service,
             )
             logger.info(
-                "run %s using %s diagnosis",
+                "run %s using %s diagnosis and %s retrieval",
                 run_id,
                 "LLM" if llm_client is not None else "mock",
+                "repository" if retrieval_service is not None else "mock",
             )
             config = {
                 "configurable": {"thread_id": run_id},
@@ -135,6 +142,8 @@ async def _persist_failure(database: Database, run_id: str, exc: Exception, *, f
 def _apply_state(run: Run, state: AgentState) -> None:
     run.attempt = int(state.get("attempt", 0))
     run.last_error = state.get("last_error")
+    if state.get("commit_sha"):
+        run.commit_sha = state["commit_sha"]
 
 
 async def _get_run(session: AsyncSession, run_id: str) -> Run | None:

@@ -42,6 +42,40 @@ API docs: http://localhost:8000/docs
 | GET | `/health` | Liveness |
 | GET | `/health/ready` | Postgres + Valkey readiness |
 
+## Testing with a real GitHub repository
+
+Phase 1 reacts to **`workflow_run` events that completed with a failing conclusion**
+(`failure`, `timed_out`, `startup_failure`). Issue events are stored and ignored; issue-driven
+repair belongs to a later phase.
+
+1. Add a CI workflow to your repository. For `The-Tourist-170/dummy_project`, copy
+   [`examples/github-actions-ci.yml`](examples/github-actions-ci.yml) to
+   `.github/workflows/ci.yml` and push it. Its tests fail on purpose.
+2. Start the stack: `docker compose -f infra/compose.yaml up -d postgres valkey`,
+   `uv run alembic upgrade head`, `uv run ash-agent`, and `uv run ash-agent-worker`.
+3. Expose the local API:
+   ```bash
+   cloudflared tunnel --url http://127.0.0.1:8000
+   ```
+   Copy the printed `https://<random>.trycloudflare.com` URL.
+4. In GitHub: **Settings → Webhooks → Add webhook**
+   - Payload URL: `https://<random>.trycloudflare.com/webhooks/github`
+   - Content type: `application/json`
+   - Secret: the value of `GITHUB_WEBHOOK_SECRET` from `.env`
+   - Events: **Workflow runs** (or "Send me everything")
+5. Push a commit or re-run the workflow. When it fails, GitHub shows a `202` delivery and a
+   JSON body like `{"status":"accepted","delivery_id":"...","run_id":"..."}`.
+6. Inspect it: `curl -s http://localhost:8000/runs | python -m json.tool`.
+
+You can also send a signed event without GitHub:
+
+```bash
+uv run python scripts/send_test_webhook.py --repo The-Tourist-170/dummy_project
+```
+
+Quick-tunnel URLs change every time `cloudflared` restarts, so update the webhook URL when you
+restart it.
+
 ## Development
 
 ```bash

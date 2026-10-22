@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="1160" viewBox="0 0 1100 1160" role="img" aria-label="Autonomous Self-Healing SWE Agent architecture">
+<defs>
+ <linearGradient id="bg" x2="1" y2="1"><stop stop-color="#0b1220"/><stop offset="1" stop-color="#15263b"/></linearGradient>
+ <linearGradient id="agent" x2="1" y2="0"><stop stop-color="#133a53"/><stop offset="1" stop-color="#164c51"/></linearGradient>
+ <marker id="arr" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0 0 L10 5 L0 10Z" fill="#82a6c4"/></marker>
+ <style>text{font-family:Inter,Arial,sans-serif;fill:#eaf3fc}.title{font-size:34px;font-weight:750}.sub{font-size:17px;fill:#a8bfd4}.head{font-size:22px;font-weight:700}.body{font-size:16px;fill:#b9cde0}.small{font-size:14px;fill:#9fbbd2}.line{stroke:#82a6c4;stroke-width:3;fill:none;marker-end:url(#arr)}.dash{stroke:#45d3bb;stroke-width:3;fill:none;stroke-dasharray:10 7;marker-end:url(#arr)}.node{fill:#182e45;stroke:#345673;stroke-width:2}.inner{fill:#102d42;stroke:#426c84;stroke-width:1.5}</style>
+</defs>
+<rect width="1100" height="1160" fill="url(#bg)"/>
+<text x="550" y="65" text-anchor="middle" class="title">Autonomous Self-Healing SWE Agent</text>
+<text x="550" y="98" text-anchor="middle" class="sub">High-level architecture · event-driven diagnosis, repair, and verification</text>
+<rect x="315" y="133" rx="16" width="470" height="108" class="node"/>
+<text x="550" y="173" text-anchor="middle" class="head">GitHub / GitLab</text>
+<text x="550" y="202" text-anchor="middle" class="body">Failed CI jobs · test logs · issues</text>
+<path d="M550 241 V289" class="line"/>
+<rect x="315" y="290" rx="16" width="470" height="110" class="node"/>
+<text x="550" y="332" text-anchor="middle" class="head">Webhook Listener</text>
+<text x="550" y="362" text-anchor="middle" class="body">Verify events · collect logs · fetch repo context</text>
+<path d="M550 400 V450" class="line"/>
+<rect x="95" y="451" rx="22" width="910" height="496" fill="url(#agent)" stroke="#3d9d9e" stroke-width="2.5"/>
+<text x="550" y="500" text-anchor="middle" class="head">AI Agent Orchestrator · LangGraph</text>
+<text x="550" y="529" text-anchor="middle" class="body">ReAct planning · tool routing · state and retry management</text>
+<rect x="142" y="577" rx="16" width="376" height="120" class="inner"/>
+<text x="330" y="619" text-anchor="middle" class="head">Code Explorer</text>
+<text x="330" y="652" text-anchor="middle" class="body">AST · LSP · Tree-sitter</text>
+<rect x="582" y="577" rx="16" width="376" height="120" class="inner"/>
+<text x="770" y="619" text-anchor="middle" class="head">Bug Reproducer</text>
+<text x="770" y="652" text-anchor="middle" class="body">Isolated Docker sandbox</text>
+<path d="M518 637 H580" class="line"/>
+<path d="M770 697 V737" class="line"/>
+<rect x="582" y="738" rx="16" width="376" height="120" class="inner"/>
+<text x="770" y="780" text-anchor="middle" class="head">Patch Generator</text>
+<text x="770" y="813" text-anchor="middle" class="body">Targeted code changes</text>
+<path d="M582 798 H520" class="line"/>
+<rect x="142" y="738" rx="16" width="376" height="120" class="inner"/>
+<text x="330" y="780" text-anchor="middle" class="head">Test Validator</text>
+<text x="330" y="813" text-anchor="middle" class="body">Unit + regression suite</text>
+<path d="M330 738 V715 H118 V798 H142" class="dash" opacity="0"/>
+<path d="M142 798 H118 V638 H142" class="dash"/>
+<text x="162" y="896" class="small">If validation fails: inspect traces, revise patch, retry (bounded loop)</text>
+<path d="M550 947 V995" class="line"/>
+<rect x="315" y="996" rx="16" width="470" height="108" class="node"/>
+<text x="550" y="1037" text-anchor="middle" class="head">Annotated Pull Request</text>
+<text x="550" y="1066" text-anchor="middle" class="body">Verified diff · test results · root-cause summary</text>
+<text x="550" y="1138" text-anchor="middle" class="small">Human review before merge · sandboxed execution · auditable tool actions</text>
+</svg>

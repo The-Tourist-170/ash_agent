@@ -275,19 +275,25 @@ def _runtime_commands(state: dict, text: str) -> list[list[str]]:
                 continue
             if "pytest" in line:
                 continue
-            if line.startswith(("docker compose", "docker-compose")):
-                service = _compose_service(line)
+            try:
+                tokens = shlex.split(line)
+            except ValueError:
+                continue
+            assignments = []
+            while tokens and re.fullmatch(r"[A-Za-z_]\w*=.*", tokens[0], re.DOTALL):
+                assignments.append(tokens.pop(0))
+            if not tokens:
+                continue
+            if tokens[:2] == ["docker", "compose"] or tokens[0] == "docker-compose":
+                service = _compose_service(shlex.join(tokens))
                 command = _compose_command(state, service)
                 if command:
-                    return [command]
+                    return [["env", *assignments, *command] if assignments else command]
                 continue
-            if line.startswith(
-                ("python ", "python3 ", "pytest ", "uv run ", "node ", "npm ", "bash ", "sh ")
+            if tokens[0] in {"python", "python3", "node", "npm", "bash", "sh"} or (
+                tokens[:2] == ["uv", "run"]
             ):
-                try:
-                    return [shlex.split(line)]
-                except ValueError:
-                    continue
+                return [["env", *assignments, *tokens] if assignments else tokens]
     return []
 
 
@@ -363,8 +369,8 @@ def _expected_output(text: str) -> str | None:
     patterns = (
         r"expected\s+(?:output|stdout|result)s?\s*:\s*`([^`]+)`",
         r"expected\s+(?:output|stdout|result)s?\s*:\s*\"([^\"]+)\"",
-        r"should\s+(?:print|output)\s+`([^`]+)`",
-        r"should\s+(?:print|output)\s+\"([^\"]+)\"",
+        r"should\s+(?:print|output|return)\s+`([^`]+)`",
+        r"should\s+(?:print|output|return)\s+\"([^\"]+)\"",
     )
     for pattern in patterns:
         match = re.search(pattern, text, re.IGNORECASE)
@@ -570,7 +576,7 @@ def _symbols_from_tests(state: dict, target_tests: list[str], scope_files: list[
 
 
 def _issue_symbols(state: dict, scope_files: list[str]) -> list[str]:
-    tokens = _issue_tokens(state)
+    tokens = _issue_tokens(state) | set(_IDENTIFIER_RE.findall(_issue_text(state)))
     symbols: list[str] = []
     root = state.get("repository_path")
     for path in scope_files:

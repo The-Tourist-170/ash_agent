@@ -1,4 +1,10 @@
-from ash_agent.intelligence.issue_scope import IssueScopeService, build_scope_service
+import pytest
+
+from ash_agent.intelligence.issue_scope import (
+    IssueScopeService,
+    _runtime_commands,
+    build_scope_service,
+)
 
 
 class FakeLLM:
@@ -179,3 +185,61 @@ class TestIssueScopeService:
         assert outcome.runtime_commands == [["python", "scripts/tool.py"]]
         assert outcome.runtime_expected_output == "42"
         assert outcome.scope_files == ["scripts/tool.py"]
+
+    @pytest.mark.parametrize(
+        ("symbol", "arguments", "expected"),
+        [("underroot", "9", "3.0"), ("raise_to_power", "2, 3", "8")],
+    )
+    async def test_environment_prefixed_runtime_issue(
+        self, tmp_path, symbol, arguments, expected
+    ) -> None:
+        root = tmp_path / "repo"
+        package = root / "src" / "calculator_bug_lab"
+        package.mkdir(parents=True)
+        (package / "__init__.py").write_text(
+            "def underroot(value):\n    return value\n\n"
+            "def raise_to_power(left, right):\n    return left + right\n"
+        )
+        code = f"from calculator_bug_lab import {symbol}; print({symbol}({arguments}))"
+        runtime_state = {
+            **state(title=f"[BUG] {symbol} runtime behavior"),
+            "issue_body": (
+                f"## Reproduction\n```bash\nPYTHONPATH=src python3 -c '{code}'\n```\n"
+                f"## Expected behavior\n`{symbol}({arguments})` should return `{expected}`.\n"
+                "The CLI can run once the separate console-entry-point issue is fixed."
+            ),
+            "repository_path": str(root),
+            "suspected_files": ["src/calculator_bug_lab/__init__.py"],
+        }
+
+        outcome = await IssueScopeService(None).determine(runtime_state)
+
+        assert outcome.validation_mode == "command"
+        assert outcome.runtime_commands == [["env", "PYTHONPATH=src", "python3", "-c", code]]
+        assert outcome.runtime_expected_output == expected
+        assert outcome.scope_files == ["src/calculator_bug_lab/__init__.py"]
+        assert outcome.scope_symbols == [symbol]
+        assert outcome.target_tests == []
+        assert outcome.unrelated_tests == runtime_state["reproduction_results"]["failed_tests"]
+
+
+class TestRuntimeCommandParsing:
+    @pytest.mark.parametrize(
+        ("command", "expected"),
+        [
+            (
+                'PYTHONPATH=src LABEL="two words" python3 -c \'print("$LABEL")\'',
+                ["env", "PYTHONPATH=src", "LABEL=two words", "python3", "-c", 'print("$LABEL")'],
+            ),
+            ("PYTHONPATH=src", None),
+            ("INVALID-NAME=value python3 script.py", None),
+            ("PYTHONPATH=src unsupported script.py", None),
+            ("PYTHONPATH=src python3 -c 'unterminated", None),
+            ("PYTHONPATH=src uv run pytest tests/test_calculator.py", None),
+            ("python3 script.py", ["python3", "script.py"]),
+        ],
+    )
+    def test_assignment_parsing(self, command, expected) -> None:
+        parsed = _runtime_commands({}, f"```bash\n{command}\n```")
+
+        assert parsed == ([expected] if expected else [])

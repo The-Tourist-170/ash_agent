@@ -131,15 +131,16 @@ class RepairService:
             )
 
         python = _python_command(workspace)
-        failed_tests = _failed_tests(state)
+        target_tests = _target_tests(state)
+        unrelated_tests = _unrelated_tests(state, target_tests)
         focused: CommandResult | None = None
-        if failed_tests:
+        if target_tests:
             focused = await self.sandbox.run(
                 [
                     python,
                     "-m",
                     "pytest",
-                    *failed_tests,
+                    *target_tests,
                     "-q",
                     "--disable-warnings",
                     "--maxfail=5",
@@ -158,13 +159,25 @@ class RepairService:
                 network=self.policy.network,
                 timeout_seconds=self.policy.timeout_seconds,
             )
-        full_ok = full is not None and full.exit_code == 0 and not full.timed_out
+        full_counts = parse_pytest(full.output) if full is not None else {}
+        full_failures = set(full_counts.get("failed_tests") or [])
+        new_failures = sorted(full_failures - set(unrelated_tests))
+        full_ok = (
+            full is not None
+            and not full.timed_out
+            and (
+                full.exit_code == 0
+                or (full.exit_code == 1 and bool(full_failures) and not new_failures)
+            )
+        )
         passed = install_ok and focused_ok and full_ok
         logger.info(
-            "validation for %s attempt %s: passed=%s",
+            "validation for %s attempt %s: passed=%s target=%s unrelated=%s",
             state.get("run_id"),
             state.get("attempt", 0),
             passed,
+            target_tests,
+            unrelated_tests,
         )
 
         sections = []
@@ -185,6 +198,9 @@ class RepairService:
                 "passed": passed,
                 "attempt": state.get("attempt", 0),
                 "install_ok": install_ok,
+                "target_tests": target_tests,
+                "unrelated_failed_tests": unrelated_tests,
+                "new_failures": new_failures,
                 "focused": _result_payload(focused),
                 "full": _result_payload(full),
             },
@@ -220,6 +236,21 @@ def _failed_tests(state: dict) -> list[str]:
     reproduction = state.get("reproduction_results") or {}
     tests = reproduction.get("failed_tests") or []
     return [str(test) for test in tests if str(test).strip()]
+
+
+def _target_tests(state: dict) -> list[str]:
+    target = state.get("target_tests")
+    if isinstance(target, list) and target:
+        return [str(test) for test in target if str(test).strip()]
+    return _failed_tests(state)
+
+
+def _unrelated_tests(state: dict, target_tests: list[str]) -> list[str]:
+    unrelated = state.get("unrelated_failed_tests")
+    if isinstance(unrelated, list) and unrelated:
+        return [str(test) for test in unrelated if str(test).strip()]
+    target = set(target_tests)
+    return [test for test in _failed_tests(state) if test not in target]
 
 
 def _result_payload(result: CommandResult | None) -> dict:
@@ -265,10 +296,18 @@ def build_patch_prompt(state: dict, source_root: Path | None = None) -> str:
         f"Plan: {state.get('plan') or ''}",
     ]
 
-    reproduction = state.get("reproduction_results") or {}
-    failed_tests = reproduction.get("failed_tests") or []
-    if failed_tests:
-        sections.append("Failing tests:\n" + "\n".join(f"- {test}" for test in failed_tests))
+    target_tests = _target_tests(state)
+    unrelated_tests = _unrelated_tests(state, target_tests)
+    if target_tests:
+        sections.append(
+            "Issue-scoped failing tests (fix ONLY these):\n"
+            + "\n".join(f"- {test}" for test in target_tests)
+        )
+    if unrelated_tests:
+        sections.append(
+            "Unrelated pre-existing failures (DO NOT fix these):\n"
+            + "\n".join(f"- {test}" for test in unrelated_tests)
+        )
 
     failure_logs = str(state.get("failure_logs") or "")
     if failure_logs:
@@ -311,8 +350,9 @@ def build_patch_prompt(state: dict, source_root: Path | None = None) -> str:
             sections.append("Verified lessons for this repository:\n" + "\n".join(rendered))
 
     sections.append(
-        "Return PatchProposal with exact old_text/new_text edits that make all failing tests pass. "
-        "Copy old_text exactly from the file contents, including indentation."
+        "Fix only the issue-scoped tests. Do not change unrelated functions or fix unrelated "
+        "pre-existing failures, even if they appear in the logs. Return exact old_text/new_text "
+        "edits and copy old_text from the file contents, including indentation."
     )
     return "\n\n".join(section for section in sections if section)[:40_000]
 

@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     app_name: str = "ash-agent"
     environment: str = "development"
     log_level: str = "INFO"
+    log_colors: str = "auto"
 
     database_url: str = "postgresql+asyncpg://ash:ash@localhost:5432/ash_agent"
     valkey_url: str = "redis://localhost:6379/0"

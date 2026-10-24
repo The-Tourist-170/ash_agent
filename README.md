@@ -94,15 +94,16 @@ restart it.
 The worker executes a LangGraph state machine for every run:
 
 ```text
-ingest → diagnose → retrieve → reproduce → plan → patch → validate
-                                                       ├─ passed            → publish   (passed)
-                                                       ├─ failed, budget    → reflect → plan
-                                                       └─ budget exhausted → escalate  (escalated)
+ingest → diagnose → retrieve → reproduce → scope → plan → patch → validate
+                                                         ├─ passed            → publish   (passed)
+                                                         ├─ failed, budget    → reflect → plan
+                                                         └─ budget exhausted → escalate  (escalated)
 ```
 
 Diagnosis uses `ChatOpenAI`; retrieval clones and indexes the repository; reproduction runs
-`pytest` in a disposable Docker sandbox; patching and validation remain deterministic mocks until
-Phase 5.
+`pytest` in a disposable Docker sandbox; the scope node narrows issue repairs to related failing
+tests; patching and validation run through the LLM and a second sandbox. Publish opens a PR when a
+token is configured.
 
 Checkpoints use `AsyncPostgresSaver`, so the graph state is written to PostgreSQL after every
 node. A worker restart or RQ retry re-invokes the graph with the same `thread_id` (the run id)
@@ -192,6 +193,16 @@ uv run python scripts/reproduce_repository.py
 Expected for `dummy_project`: `confirmed: true`, `exit_code: 1`, `3 failed`, `3 passed`, and the
 three failing test names. Set `SANDBOX_ENABLED=false` to use the deterministic mock.
 
+### Issue-scoped repairs
+
+Issue-triggered runs add a `scope` node between reproduction and planning. An LLM selects only the
+failing tests that directly prove the reported issue; unrelated pre-existing failures are recorded
+but not patched. Validation requires the target tests to pass and introduces no new failures.
+A full-suite exit code of 1 is accepted when the remaining failures are exactly the baseline
+unrelated set. The PR body lists target tests and untouched unrelated tests.
+
+Repair attempts stop when the target tests pass; unrelated bugs remain for separate issues/PRs.
+
 ### Repair memory and pull requests
 
 Only a patch that passes focused and full validation is stored in `repair_lessons`. The next run
@@ -213,6 +224,26 @@ curl -s http://localhost:8000/metrics | python -m json.tool
 On macOS the worker uses RQ's `SimpleWorker` (jobs run in-process) because RQ's forked child can
 hit Objective-C fork-safety crashes; Linux keeps the standard forked `Worker`. The worker also
 runs RQ's scheduler in-process so retries are dequeued.
+
+### Logs
+
+Console logs use a compact, color-coded layout:
+
+```text
+19:10:47 INFO    queue.jobs             | run ... claimed by worker
+19:10:55 INFO    agent.diagnose         | LLM diagnosis completed for run ...
+19:10:56 WARNING agent.retrieve         | retrieval failed, using fallback: RepositoryError
+19:10:57 INFO    sandbox.executor       | sandbox reproduction: confirmed=True exit_code=1 failed=3
+19:11:03 INFO    svc.repair_service     | validation for ... attempt 1: passed=True
+```
+
+`LOG_COLORS` controls ANSI colors:
+
+- `auto` — colors when stdout is a TTY (default)
+- `always` — force colors, useful when piping through `tee`
+- `never` — plain text for log files/CI
+
+`LOG_LEVEL=DEBUG` enables verbose agent logs. `NO_COLOR=1` also disables colors.
 
 ## Development
 

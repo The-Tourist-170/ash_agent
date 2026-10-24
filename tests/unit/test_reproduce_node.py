@@ -58,8 +58,8 @@ class TestReproduceNode:
 
 
 class TestReproduceRouting:
-    def test_confirmed_goes_to_plan(self) -> None:
-        assert route_after_reproduce({"reproduction_confirmed": True}) == "plan"
+    def test_confirmed_goes_to_scope(self) -> None:
+        assert route_after_reproduce({"reproduction_confirmed": True}) == "scope"
 
     def test_unconfirmed_goes_to_escalate(self) -> None:
         assert route_after_reproduce({"reproduction_confirmed": False}) == "escalate"

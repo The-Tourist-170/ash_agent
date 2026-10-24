@@ -188,6 +188,59 @@ class TestValidation:
         assert outcome.passed is False
         assert "missing" in outcome.test_results["error"]
 
+    async def test_allows_preexisting_unrelated_failure(self, tmp_path: Path) -> None:
+        root = repo(tmp_path)
+        sandbox = FakeSandbox(
+            [
+                result(0, "1 passed"),
+                result(
+                    1,
+                    "1 failed, 5 passed in 0.10s\nFAILED tests/test_other.py::test_other",
+                ),
+            ]
+        )
+        service = RepairService(
+            settings(tmp_path),
+            FakeLLM(PatchProposal(summary="x", edits=[])),
+            sandbox=sandbox,
+        )
+        patch_state = state(root)
+        patch_state["patch_workspace"] = str(root)
+        patch_state["target_tests"] = ["tests/test_core.py::test_total"]
+        patch_state["unrelated_failed_tests"] = ["tests/test_other.py::test_other"]
+
+        outcome = await service.validate(patch_state)
+
+        assert outcome.passed is True
+        assert outcome.test_results["new_failures"] == []
+        assert outcome.test_results["unrelated_failed_tests"] == ["tests/test_other.py::test_other"]
+
+    async def test_new_failure_outside_scope_fails(self, tmp_path: Path) -> None:
+        root = repo(tmp_path)
+        sandbox = FakeSandbox(
+            [
+                result(0, "1 passed"),
+                result(
+                    1,
+                    "1 failed, 5 passed in 0.10s\nFAILED tests/test_new.py::test_new",
+                ),
+            ]
+        )
+        service = RepairService(
+            settings(tmp_path),
+            FakeLLM(PatchProposal(summary="x", edits=[])),
+            sandbox=sandbox,
+        )
+        patch_state = state(root)
+        patch_state["patch_workspace"] = str(root)
+        patch_state["target_tests"] = ["tests/test_core.py::test_total"]
+        patch_state["unrelated_failed_tests"] = ["tests/test_other.py::test_other"]
+
+        outcome = await service.validate(patch_state)
+
+        assert outcome.passed is False
+        assert outcome.test_results["new_failures"] == ["tests/test_new.py::test_new"]
+
 
 class TestPrompt:
     def test_includes_failure_logs_and_lessons(self, tmp_path: Path) -> None:
@@ -195,6 +248,8 @@ class TestPrompt:
         prompt = build_patch_prompt(
             {
                 **state(root),
+                "target_tests": ["tests/test_core.py::test_total"],
+                "unrelated_failed_tests": ["tests/test_other.py::test_other"],
                 "prior_lessons": [{"root_cause": "tax order", "patch_summary": "discount first"}],
             },
             root,
@@ -203,6 +258,8 @@ class TestPrompt:
         assert "assert 100.0 == 99.0" in prompt
         assert "tax order" in prompt
         assert "def total" in prompt
+        assert "Issue-scoped failing tests" in prompt
+        assert "DO NOT fix" in prompt
 
 
 class TestCleanup:

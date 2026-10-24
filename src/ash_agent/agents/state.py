@@ -18,6 +18,10 @@ class AgentState(TypedDict, total=False):
     root_cause: str | None
     reproduction_confirmed: bool
     reproduction_results: dict[str, object]
+    target_tests: list[str]
+    unrelated_failed_tests: list[str]
+    scope_reasoning: str
+    scope_error: str | None
     plan: str | None
     patch_diff: str | None
     patch_summary: str | None

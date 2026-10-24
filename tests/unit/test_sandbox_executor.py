@@ -147,6 +147,18 @@ class TestPytestParsing:
         assert parsed["skipped"] == 1
         assert len(parsed["failed_tests"]) == 2
 
+    def test_does_not_match_number_before_newline(self) -> None:
+        output = (
+            "assert add(2, 3) == 5\n"
+            "FAILED tests/test_calculator.py::test_addition\n"
+            "1 failed, 2 passed in 0.01s\n"
+        )
+
+        parsed = parse_pytest(output)
+
+        assert parsed["failed"] == 1
+        assert parsed["passed"] == 2
+
 
 class TestReproductionService:
     async def test_reproduces_failing_tests(self, tmp_path: Path) -> None:

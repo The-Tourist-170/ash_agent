@@ -191,9 +191,25 @@ class GitHubPullRequestService:
         full = state.get("test_results") or {}
         focused = full.get("focused") or {}
         full_result = full.get("full") or {}
-        return f"""## Root cause
+        target_tests = state.get("target_tests") or []
+        unrelated_tests = state.get("unrelated_failed_tests") or []
+        scope_lines = "\n".join(f"- `{test}`" for test in target_tests) or "- n/a"
+        unrelated_lines = (
+            "\n".join(f"- `{test}`" for test in unrelated_tests) or "None (full suite clean)"
+        )
+        issue_number = state.get("issue_number")
+        fixes = f"Fixes #{issue_number}\n\n" if issue_number else ""
+        return f"""{fixes}## Root cause
 
 {state.get("root_cause") or "Not available"}
+
+## Issue scope
+
+Target failing tests:
+{scope_lines}
+
+Pre-existing unrelated failures left untouched:
+{unrelated_lines}
 
 ## Patch
 

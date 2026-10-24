@@ -10,6 +10,7 @@ from ash_agent.agents.graph import build_graph
 from ash_agent.agents.state import AgentState
 from ash_agent.config import get_settings
 from ash_agent.integrations import build_llm_client
+from ash_agent.intelligence.issue_scope import build_scope_service
 from ash_agent.persistence.checkpoints import open_checkpointer
 from ash_agent.persistence.models import Run, RunStatus
 from ash_agent.persistence.postgres import Database
@@ -44,6 +45,10 @@ def initial_state(run: Run, prior_lessons: list[dict] | None = None) -> AgentSta
         "root_cause": None,
         "reproduction_confirmed": False,
         "reproduction_results": {},
+        "target_tests": [],
+        "unrelated_failed_tests": [],
+        "scope_reasoning": "",
+        "scope_error": None,
         "plan": None,
         "patch_diff": None,
         "patch_summary": None,
@@ -98,6 +103,7 @@ async def _process_run(run_id: str) -> None:
             reproduction_service = build_reproduction_service(settings)
             repair_service = build_repair_service(settings, llm_client)
             publish_service = build_pull_request_service(settings)
+            scope_service = build_scope_service(llm_client)
             graph = build_graph(
                 success_on_attempt=settings.mock_repair_success_attempt,
                 checkpointer=saver,
@@ -106,6 +112,7 @@ async def _process_run(run_id: str) -> None:
                 reproduction_service=reproduction_service,
                 repair_service=repair_service,
                 publish_service=publish_service,
+                scope_service=scope_service,
             )
             logger.info(
                 "run %s using %s diagnosis, %s retrieval, %s reproduction, "

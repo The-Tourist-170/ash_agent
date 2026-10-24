@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 def main() -> None:
     settings = get_settings()
-    configure_logging(settings.log_level)
+    configure_logging(settings.log_level, settings.log_colors)
 
     asyncio.run(setup_checkpointer(settings))
     logger.info("checkpoint schema ready")

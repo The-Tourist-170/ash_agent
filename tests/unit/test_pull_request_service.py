@@ -138,3 +138,41 @@ class TestPullRequestFactory:
         service = build_pull_request_service(settings)
 
         assert isinstance(service, GitHubPullRequestService)
+
+
+class TestPullRequestBody:
+    def test_links_issue_automatically(self) -> None:
+        service = GitHubPullRequestService(token="token")
+
+        body = service._body(
+            {
+                "issue_number": 4,
+                "root_cause": "addition bug",
+                "patch_summary": "use addition",
+                "patch_diff": "- a\n+ b\n",
+                "target_tests": ["tests/test_calculator.py::test_addition_returns_sum"],
+                "unrelated_failed_tests": [
+                    "tests/test_calculator.py::test_subtraction_returns_difference"
+                ],
+                "test_results": {},
+            }
+        )
+
+        assert body.startswith("Fixes #4\n\n")
+        assert "Issue scope" in body
+        assert "test_addition_returns_sum" in body
+        assert "test_subtraction_returns_difference" in body
+
+    def test_workflow_run_has_no_issue_link(self) -> None:
+        service = GitHubPullRequestService(token="token")
+
+        body = service._body(
+            {
+                "root_cause": "failure",
+                "patch_summary": "fix",
+                "patch_diff": "",
+                "test_results": {},
+            }
+        )
+
+        assert not body.startswith("Fixes #")

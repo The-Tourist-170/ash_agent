@@ -39,7 +39,7 @@ _IGNORED_PATHS = (
 )
 
 _PYTEST_COUNT = re.compile(
-    r"(\d+)\s+(passed|failed|error|errors|skipped|xfailed|xpassed)", re.IGNORECASE
+    r"(\d+)[ \t]+(passed|failed|error|errors|skipped|xfailed|xpassed)", re.IGNORECASE
 )
 _PYTEST_FAILED = re.compile(r"^FAILED\s+(.+?)(?:\s+-\s+.*)?$", re.MULTILINE)
 

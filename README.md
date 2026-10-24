@@ -221,8 +221,8 @@ exit code/output. Test files are never edited.
 
 The sandbox has no Docker socket, so a real `docker compose run` is not executed inside it. For a
 Compose issue, the agent runs the service's underlying command directly (for example
-`python scripts/compose_smoke.py`) and can additionally validate the Compose configuration. Install
-and packaging failures are out of scope and still escalate.
+`python scripts/compose_smoke.py`); it does not start the Compose container. Install and packaging
+failures are out of scope and still escalate.
 
 ### Repair memory and pull requests
 

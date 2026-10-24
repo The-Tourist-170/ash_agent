@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     llm_base_url: str | None = None
     llm_model: str | None = None
     llm_api_key: SecretStr = SecretStr("")
-    llm_timeout_seconds: float = 60.0
+    llm_timeout_seconds: float = 180.0
 
     retrieval_enabled: bool = True
     workspace_dir: str = ".ash_agent/workspaces"
@@ -71,6 +71,9 @@ class Settings(BaseSettings):
     sandbox_install_dependencies: bool = True
     sandbox_test_args: str = "-q --disable-warnings --maxfail=5"
     docker_binary: str = "docker"
+
+    repair_enabled: bool = True
+    repair_workspace_dir: str = ".ash_agent/repairs"
 
     api_host: str = "0.0.0.0"
     api_port: int = 8000

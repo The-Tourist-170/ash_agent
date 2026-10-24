@@ -14,6 +14,7 @@ from ash_agent.persistence.checkpoints import open_checkpointer
 from ash_agent.persistence.models import Run, RunStatus
 from ash_agent.persistence.postgres import Database
 from ash_agent.sandbox.executor import build_reproduction_service
+from ash_agent.services.repair_service import build_repair_service, cleanup_workspace
 from ash_agent.services.retrieval_service import build_retrieval_service
 
 logger = logging.getLogger(__name__)
@@ -43,6 +44,14 @@ def initial_state(run: Run) -> AgentState:
         "reproduction_results": {},
         "plan": None,
         "patch_diff": None,
+        "patch_summary": None,
+        "patch_edits": [],
+        "changed_files": [],
+        "patched_files": {},
+        "patch_workspace": None,
+        "patch_error": None,
+        "validation_logs": "",
+        "prior_lessons": [],
         "test_results": {},
         "attempt": 0,
         "max_attempts": run.max_attempts,
@@ -58,6 +67,7 @@ def process_run(run_id: str) -> None:
 async def _process_run(run_id: str) -> None:
     settings = get_settings()
     database = Database(settings.database_url)
+    state: AgentState | None = None
     try:
         async with database.session_factory() as session:
             run = await session.get(Run, UUID(run_id))
@@ -77,19 +87,22 @@ async def _process_run(run_id: str) -> None:
             llm_client = build_llm_client(settings)
             retrieval_service = build_retrieval_service(settings)
             reproduction_service = build_reproduction_service(settings)
+            repair_service = build_repair_service(settings, llm_client)
             graph = build_graph(
                 success_on_attempt=settings.mock_repair_success_attempt,
                 checkpointer=saver,
                 llm_client=llm_client,
                 retrieval_service=retrieval_service,
                 reproduction_service=reproduction_service,
+                repair_service=repair_service,
             )
             logger.info(
-                "run %s using %s diagnosis, %s retrieval and %s reproduction",
+                "run %s using %s diagnosis, %s retrieval, %s reproduction and %s repair",
                 run_id,
                 "LLM" if llm_client is not None else "mock",
                 "repository" if retrieval_service is not None else "mock",
                 "sandbox" if reproduction_service is not None else "mock",
+                "LLM+sandbox" if repair_service is not None else "mock",
             )
             config = {
                 "configurable": {"thread_id": run_id},
@@ -113,6 +126,8 @@ async def _process_run(run_id: str) -> None:
         await _persist_failure(database, run_id, exc, final=retries_left == 0)
         raise
     finally:
+        if state:
+            await asyncio.to_thread(cleanup_workspace, state.get("patch_workspace"))
         await database.dispose()
 
 

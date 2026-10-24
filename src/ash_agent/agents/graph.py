@@ -4,7 +4,7 @@ from langgraph.graph import END, START, StateGraph
 from ash_agent.agents.nodes.diagnose import diagnose, make_llm_diagnose_node
 from ash_agent.agents.nodes.escalate import escalate
 from ash_agent.agents.nodes.ingest import ingest
-from ash_agent.agents.nodes.patch import patch
+from ash_agent.agents.nodes.patch import RepairBackend, make_patch_node
 from ash_agent.agents.nodes.plan import plan
 from ash_agent.agents.nodes.publish import publish
 from ash_agent.agents.nodes.reflect import reflect
@@ -24,18 +24,21 @@ def build_graph(
     llm_client: DiagnosisLLM | None = None,
     retrieval_service: RetrievalBackend | None = None,
     reproduction_service: ReproductionBackend | None = None,
+    repair_service: RepairBackend | None = None,
 ):
     diagnose_node = make_llm_diagnose_node(llm_client) if llm_client else diagnose
     retrieve_node = make_retrieve_node(retrieval_service)
     reproduce_node = make_reproduce_node(reproduction_service)
+    patch_node = make_patch_node(repair_service)
+    validate_node = make_validate_node(success_on_attempt, repair_service)
     builder = StateGraph(AgentState)
     builder.add_node("ingest", ingest)
     builder.add_node("diagnose", diagnose_node)
     builder.add_node("retrieve", retrieve_node)
     builder.add_node("reproduce", reproduce_node)
     builder.add_node("plan", plan)
-    builder.add_node("patch", patch)
-    builder.add_node("validate", make_validate_node(success_on_attempt))
+    builder.add_node("patch", patch_node)
+    builder.add_node("validate", validate_node)
     builder.add_node("reflect", reflect)
     builder.add_node("publish", publish)
     builder.add_node("escalate", escalate)

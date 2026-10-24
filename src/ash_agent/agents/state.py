@@ -20,6 +20,14 @@ class AgentState(TypedDict, total=False):
     reproduction_results: dict[str, object]
     plan: str | None
     patch_diff: str | None
+    patch_summary: str | None
+    patch_edits: list[dict]
+    changed_files: list[str]
+    patched_files: dict[str, str]
+    patch_workspace: str | None
+    patch_error: str | None
+    validation_logs: str
+    prior_lessons: list[dict]
     test_results: dict[str, object]
     attempt: int
     max_attempts: int

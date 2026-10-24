@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Protocol, TypeVar
 
 import httpx
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, Field
+
+T = TypeVar("T", bound=BaseModel)
 
 
 class LLMError(RuntimeError):
@@ -26,6 +28,15 @@ class DiagnosisLLM(Protocol):
     async def diagnose(self, system_prompt: str, user_prompt: str) -> Diagnosis: ...
 
 
+class StructuredLLM(Protocol):
+    async def complete_structured(
+        self,
+        schema: type[BaseModel],
+        system_prompt: str,
+        user_prompt: str,
+    ) -> BaseModel: ...
+
+
 class _StripAuthorization(httpx.Auth):
     """Remove the SDK's bearer header for endpoints that reject any auth."""
 
@@ -42,6 +53,14 @@ class OpenAICompatibleClient:
     timeout_seconds: float = 60.0
 
     async def diagnose(self, system_prompt: str, user_prompt: str) -> Diagnosis:
+        return await self.complete_structured(Diagnosis, system_prompt, user_prompt)
+
+    async def complete_structured(
+        self,
+        schema: type[T],
+        system_prompt: str,
+        user_prompt: str,
+    ) -> T:
         auth = None if self.api_key else _StripAuthorization()
         http_client = httpx.AsyncClient(auth=auth, timeout=self.timeout_seconds)
         try:
@@ -54,7 +73,7 @@ class OpenAICompatibleClient:
                 timeout=self.timeout_seconds,
                 max_retries=0,
             )
-            structured = model.with_structured_output(Diagnosis, method="function_calling")
+            structured = model.with_structured_output(schema, method="function_calling")
             result = await structured.ainvoke(
                 [
                     SystemMessage(content=system_prompt),
@@ -67,9 +86,9 @@ class OpenAICompatibleClient:
             await http_client.aclose()
 
         if isinstance(result, dict):
-            result = Diagnosis.model_validate(result)
-        if not isinstance(result, Diagnosis):
-            raise LLMError("LLM returned no structured diagnosis")
+            result = schema.model_validate(result)
+        if not isinstance(result, schema):
+            raise LLMError("LLM returned no structured output")
         return result
 
     @property

@@ -17,7 +17,7 @@ the LangGraph diagnosis/repair loop and open an annotated pull request.
 | Qdrant | Semantic code/log retrieval (Phase 3) |
 | FastEmbed | Local code-chunk embeddings |
 | Docker sandbox | Disposable test reproduction (Phase 4) |
-| Mem0 | Verified repair lessons (Phase 6) |
+| Repair memory | Verified, repository-scoped lessons (Phase 6) |
 
 ## Quick start
 
@@ -43,6 +43,7 @@ API docs: http://localhost:8000/docs
 | POST | `/webhooks/github` | HMAC-verified GitHub webhook, deduplicated by delivery ID |
 | GET | `/runs` | List repair runs (`status`, `limit`, `offset`) |
 | GET | `/runs/{run_id}` | Inspect a single run |
+| GET | `/metrics` | Run, repair and PR counts |
 | GET | `/health` | Liveness |
 | GET | `/health/ready` | Postgres + Valkey readiness |
 
@@ -126,6 +127,10 @@ and resumes from the last completed node. The worker creates the checkpoint sche
 | `SANDBOX_NETWORK` | `none` | Test-container network |
 | `SANDBOX_TIMEOUT_SECONDS` | 120 | Test execution timeout |
 | `SANDBOX_MEMORY_LIMIT` | `512m` | Container memory cap |
+| `PUBLISH_ENABLED` | `true` | Open a pull request after validation |
+| `GITHUB_TOKEN` | empty | Repo-scoped token; empty = local-only publish |
+| `GITHUB_API_URL` | `https://api.github.com` | GitHub API base |
+| `GITHUB_PR_BRANCH_PREFIX` | `ash-agent/fix` | Branch prefix |
 
 ### LLM diagnosis
 
@@ -187,6 +192,24 @@ uv run python scripts/reproduce_repository.py
 Expected for `dummy_project`: `confirmed: true`, `exit_code: 1`, `3 failed`, `3 passed`, and the
 three failing test names. Set `SANDBOX_ENABLED=false` to use the deterministic mock.
 
+### Repair memory and pull requests
+
+Only a patch that passes focused and full validation is stored in `repair_lessons`. The next run
+for the same repository recalls the latest three lessons and adds them to the diagnosis and patch
+prompts. This is a Mem0-compatible seam backed by PostgreSQL; no model-generated but unvalidated
+fix is remembered.
+
+After validation passes, the `publish` node opens a GitHub pull request using the Git Data API:
+branch `ash-agent/fix-<run-id>`, one commit with the patched files, and an annotated body containing
+the root cause, diff and test evidence. Human review and merge remain manual. Without
+`GITHUB_TOKEN`, the run stays `passed` with `publish_status=skipped`.
+
+```bash
+curl -s http://localhost:8000/metrics | python -m json.tool
+```
+
+`GET /metrics` reports run counts by status, average attempts, published PRs and stored lessons.
+
 On macOS the worker uses RQ's `SimpleWorker` (jobs run in-process) because RQ's forked child can
 hit Objective-C fork-safety crashes; Linux keeps the standard forked `Worker`. The worker also
 runs RQ's scheduler in-process so retries are dequeued.
@@ -209,4 +232,5 @@ scripts also expect Neo4j/Qdrant and the sandbox Docker image.
 - Phase 2: LangGraph workflow, PostgreSQL checkpoints, bounded retries and resumption — complete
 - Phase 3: repository cloning, Tree-sitter symbols, Neo4j graph, Qdrant hybrid retrieval — complete
 - Phase 4: isolated Docker reproduction, dependency install, pytest evidence — complete
-- Phase 5 onward: see `NOTES.md`
+- Phase 5: LLM patch generation, focused/full validation, bounded self-correction — complete
+- Phase 6: verified repair memory, GitHub pull requests, audit fields and metrics — complete

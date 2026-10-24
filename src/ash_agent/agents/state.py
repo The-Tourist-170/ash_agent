@@ -28,6 +28,11 @@ class AgentState(TypedDict, total=False):
     patch_error: str | None
     validation_logs: str
     prior_lessons: list[dict]
+    pr_url: str | None
+    pr_number: int | None
+    pr_branch: str | None
+    pr_error: str | None
+    publish_status: str | None
     test_results: dict[str, object]
     attempt: int
     max_attempts: int

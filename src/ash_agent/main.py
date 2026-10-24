@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 import uvicorn
 from fastapi import FastAPI
 
-from ash_agent.api.routes import health, runs, webhooks
+from ash_agent.api.routes import health, metrics, runs, webhooks
 from ash_agent.config import Settings, get_settings
 from ash_agent.observability.logging import configure_logging
 from ash_agent.persistence.postgres import Database
@@ -48,6 +48,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(health.router)
     app.include_router(webhooks.router)
     app.include_router(runs.router)
+    app.add_api_route("/metrics", metrics.read_metrics, tags=["metrics"])
     return app
 
 

@@ -80,6 +80,11 @@ class Run(Base):
     max_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
     rq_job_id: Mapped[str | None] = mapped_column(String(64))
     last_error: Mapped[str | None] = mapped_column(Text)
+    patch_summary: Mapped[str | None] = mapped_column(Text)
+    pr_url: Mapped[str | None] = mapped_column(String(512))
+    pr_number: Mapped[int | None] = mapped_column(BigInteger)
+    pr_branch: Mapped[str | None] = mapped_column(String(255))
+    publish_status: Mapped[str | None] = mapped_column(String(32))
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(
@@ -87,4 +92,22 @@ class Run(Base):
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class RepairLesson(Base):
+    __tablename__ = "repair_lessons"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    run_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("runs.id", ondelete="SET NULL"), index=True
+    )
+    repository: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    commit_sha: Mapped[str | None] = mapped_column(String(40))
+    root_cause: Mapped[str] = mapped_column(Text, nullable=False)
+    patch_summary: Mapped[str] = mapped_column(Text, nullable=False)
+    patch_diff: Mapped[str | None] = mapped_column(Text)
+    failed_tests: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
     )

@@ -23,5 +23,10 @@ class RunRead(BaseModel):
     max_attempts: int
     rq_job_id: str | None
     last_error: str | None
+    patch_summary: str | None
+    pr_url: str | None
+    pr_number: int | None
+    pr_branch: str | None
+    publish_status: str | None
     created_at: datetime
     updated_at: datetime

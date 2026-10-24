@@ -24,9 +24,21 @@ def build_user_prompt(state: AgentState) -> str:
     return (
         f"Repository: {state.get('repository')}\n"
         f"Branch: {state.get('ref') or 'unknown'}\n"
-        f"{trigger}\n\n"
-        "Diagnose this failure."
+        f"{trigger}\n\n" + _lessons_prompt(state) + "Diagnose this failure."
     )
+
+
+def _lessons_prompt(state: AgentState) -> str:
+    lessons = state.get("prior_lessons") or []
+    rendered = []
+    for lesson in lessons[:3]:
+        if isinstance(lesson, dict):
+            rendered.append(
+                f"- {lesson.get('root_cause', '')} -> {lesson.get('patch_summary', '')}"
+            )
+    if not rendered:
+        return ""
+    return "Verified lessons for this repository:\n" + "\n".join(rendered) + "\n\n"
 
 
 def make_llm_diagnose_node(client: DiagnosisLLM):

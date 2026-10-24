@@ -14,6 +14,8 @@ from ash_agent.persistence.checkpoints import open_checkpointer
 from ash_agent.persistence.models import Run, RunStatus
 from ash_agent.persistence.postgres import Database
 from ash_agent.sandbox.executor import build_reproduction_service
+from ash_agent.services.memory_service import MemoryService
+from ash_agent.services.pull_request_service import build_pull_request_service
 from ash_agent.services.repair_service import build_repair_service, cleanup_workspace
 from ash_agent.services.retrieval_service import build_retrieval_service
 
@@ -24,7 +26,7 @@ TERMINAL_STATUSES = frozenset(
 )
 
 
-def initial_state(run: Run) -> AgentState:
+def initial_state(run: Run, prior_lessons: list[dict] | None = None) -> AgentState:
     return {
         "run_id": str(run.id),
         "source": run.source,
@@ -51,7 +53,12 @@ def initial_state(run: Run) -> AgentState:
         "patch_workspace": None,
         "patch_error": None,
         "validation_logs": "",
-        "prior_lessons": [],
+        "prior_lessons": prior_lessons or [],
+        "pr_url": None,
+        "pr_number": None,
+        "pr_branch": None,
+        "pr_error": None,
+        "publish_status": None,
         "test_results": {},
         "attempt": 0,
         "max_attempts": run.max_attempts,
@@ -67,6 +74,7 @@ def process_run(run_id: str) -> None:
 async def _process_run(run_id: str) -> None:
     settings = get_settings()
     database = Database(settings.database_url)
+    memory = MemoryService(database)
     state: AgentState | None = None
     try:
         async with database.session_factory() as session:
@@ -83,11 +91,13 @@ async def _process_run(run_id: str) -> None:
                 await session.commit()
                 logger.info("run %s claimed by worker", run_id)
 
+        prior_lessons = await memory.recall(run.repository)
         async with open_checkpointer(settings) as saver:
             llm_client = build_llm_client(settings)
             retrieval_service = build_retrieval_service(settings)
             reproduction_service = build_reproduction_service(settings)
             repair_service = build_repair_service(settings, llm_client)
+            publish_service = build_pull_request_service(settings)
             graph = build_graph(
                 success_on_attempt=settings.mock_repair_success_attempt,
                 checkpointer=saver,
@@ -95,14 +105,17 @@ async def _process_run(run_id: str) -> None:
                 retrieval_service=retrieval_service,
                 reproduction_service=reproduction_service,
                 repair_service=repair_service,
+                publish_service=publish_service,
             )
             logger.info(
-                "run %s using %s diagnosis, %s retrieval, %s reproduction and %s repair",
+                "run %s using %s diagnosis, %s retrieval, %s reproduction, "
+                "%s repair and %s publishing",
                 run_id,
                 "LLM" if llm_client is not None else "mock",
                 "repository" if retrieval_service is not None else "mock",
                 "sandbox" if reproduction_service is not None else "mock",
                 "LLM+sandbox" if repair_service is not None else "mock",
+                "GitHub" if publish_service is not None else "local",
             )
             config = {
                 "configurable": {"thread_id": run_id},
@@ -110,7 +123,7 @@ async def _process_run(run_id: str) -> None:
             }
             checkpoint = await saver.aget_tuple({"configurable": {"thread_id": run_id}})
             if checkpoint is None:
-                state = await graph.ainvoke(initial_state(run), config)
+                state = await graph.ainvoke(initial_state(run, prior_lessons), config)
             else:
                 logger.info("run %s resuming from checkpointer", run_id)
                 state = await graph.ainvoke(None, config)
@@ -118,6 +131,17 @@ async def _process_run(run_id: str) -> None:
         if state is None:
             raise RuntimeError("agent graph returned no final state")
         await _persist_final_state(database, run_id, state)
+        if state.get("status") == RunStatus.PASSED.value and state.get("patch_diff"):
+            failed_tests = (state.get("reproduction_results") or {}).get("failed_tests", [])
+            await memory.record(
+                run_id=run_id,
+                repository=run.repository,
+                commit_sha=state.get("commit_sha") or run.commit_sha,
+                root_cause=state.get("root_cause"),
+                patch_summary=state.get("patch_summary"),
+                patch_diff=state.get("patch_diff"),
+                failed_tests=[str(test) for test in failed_tests],
+            )
         logger.info("run %s finished with status %s", run_id, state.get("status"))
     except Exception as exc:
         job = get_current_job()
@@ -162,6 +186,11 @@ async def _persist_failure(database: Database, run_id: str, exc: Exception, *, f
 def _apply_state(run: Run, state: AgentState) -> None:
     run.attempt = int(state.get("attempt", 0))
     run.last_error = state.get("last_error")
+    run.patch_summary = state.get("patch_summary")
+    run.pr_url = state.get("pr_url")
+    run.pr_number = state.get("pr_number")
+    run.pr_branch = state.get("pr_branch")
+    run.publish_status = state.get("publish_status")
     if state.get("commit_sha"):
         run.commit_sha = state["commit_sha"]
 

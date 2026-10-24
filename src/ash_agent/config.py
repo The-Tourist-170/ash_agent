@@ -75,6 +75,10 @@ class Settings(BaseSettings):
     repair_enabled: bool = True
     repair_workspace_dir: str = ".ash_agent/repairs"
 
+    publish_enabled: bool = True
+    github_api_url: str = "https://api.github.com"
+    github_pr_branch_prefix: str = "ash-agent/fix"
+
     api_host: str = "0.0.0.0"
     api_port: int = 8000
 

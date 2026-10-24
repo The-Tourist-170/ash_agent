@@ -2,7 +2,8 @@ import pytest
 
 from ash_agent.agents.graph import build_graph
 from ash_agent.integrations.llm import Diagnosis
-from ash_agent.sandbox.executor import ReproductionOutcome
+from ash_agent.intelligence.issue_scope import ScopeOutcome
+from ash_agent.sandbox.executor import ReproductionOutcome, RuntimeOutcome
 from ash_agent.services.retrieval_service import RetrievalOutcome
 
 
@@ -63,6 +64,38 @@ class FailingReproduction:
             logs="could not collect tests",
             test_results={"exit_code": 4, "errors": 1},
             backend="docker",
+        )
+
+
+class RuntimeReproduction:
+    async def reproduce(self, state) -> ReproductionOutcome:
+        return ReproductionOutcome(
+            confirmed=False,
+            logs="pytest passed",
+            test_results={"exit_code": 0, "errors": 0},
+            backend="docker",
+        )
+
+    async def reproduce_runtime(self, state) -> RuntimeOutcome:
+        return RuntimeOutcome(
+            confirmed=True,
+            logs="NameError: message is not defined",
+            results={"mode": "command", "confirmed": True},
+            backend="docker",
+        )
+
+
+class RuntimeScope:
+    async def determine(self, state) -> ScopeOutcome:
+        return ScopeOutcome(
+            target_tests=[],
+            unrelated_tests=[],
+            reasoning="runtime issue",
+            scope_files=["scripts/smoke.py"],
+            scope_symbols=[],
+            validation_mode="command",
+            runtime_commands=[["python", "scripts/smoke.py"]],
+            runtime_description="runtime command: python scripts/smoke.py",
         )
 
 
@@ -141,3 +174,21 @@ class TestAgentGraph:
         assert result["reproduction_results"]["exit_code"] == 4
         assert result["status"] == "escalated"
         assert "could not reproduce" in result["last_error"]
+
+    async def test_graph_uses_runtime_validation_for_issue(self) -> None:
+        result = await build_graph(
+            success_on_attempt=1,
+            reproduction_service=RuntimeReproduction(),
+            scope_service=RuntimeScope(),
+        ).ainvoke(
+            base_state(
+                source="issue",
+                issue_number=11,
+                issue_title="[BUG] Docker Compose smoke service crashes with NameError",
+            )
+        )
+
+        assert result["validation_mode"] == "command"
+        assert result["runtime_commands"] == [["python", "scripts/smoke.py"]]
+        assert result["reproduction_confirmed"] is True
+        assert result["status"] == "passed"

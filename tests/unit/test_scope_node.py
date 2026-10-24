@@ -76,3 +76,11 @@ class TestScopeRouting:
 
     def test_scope_error_goes_to_escalate(self) -> None:
         assert route_after_scope({"scope_error": "no match"}) == "escalate"
+
+    def test_runtime_scope_goes_to_runtime(self) -> None:
+        assert (
+            route_after_scope(
+                {"scope_error": None, "validation_mode": "command", "target_tests": []}
+            )
+            == "runtime"
+        )

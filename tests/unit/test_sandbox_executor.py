@@ -239,3 +239,68 @@ class TestReproductionService:
 
         assert outcome.confirmed is False
         assert outcome.test_results["timed_out"] is True
+
+    async def test_runtime_failure_is_confirmed_without_pytest(self, tmp_path: Path) -> None:
+        source = tmp_path / "repo"
+        (source / "scripts").mkdir(parents=True)
+        (source / "scripts" / "compose_smoke.py").write_text("print(message)\n")
+        sandbox = FakeSandbox(
+            [
+                result(
+                    1,
+                    stdout="NameError: name 'message' is not defined",
+                    command=("python", "scripts/compose_smoke.py"),
+                )
+            ]
+        )
+        service = ReproductionService(
+            settings(tmp_path),
+            sandbox=sandbox,
+            cloner=FakeCloner(source),
+        )
+
+        outcome = await service.reproduce_runtime(
+            {
+                "run_id": "run-runtime",
+                "repository": "owner/repo",
+                "repository_path": str(source),
+                "runtime_commands": [["python", "scripts/compose_smoke.py"]],
+                "runtime_expected_exit": 0,
+            }
+        )
+
+        assert outcome.confirmed is True
+        assert outcome.results["mode"] == "command"
+        assert outcome.results["results"][0]["exit_code"] == 1
+        assert "NameError" in outcome.logs
+        assert [call[1] for call in sandbox.calls] == ["none"]
+
+    async def test_runtime_success_does_not_confirm(self, tmp_path: Path) -> None:
+        source = tmp_path / "repo"
+        (source / "scripts").mkdir(parents=True)
+        (source / "scripts" / "compose_smoke.py").write_text("print('ok')\n")
+        sandbox = FakeSandbox(
+            [
+                result(
+                    0,
+                    stdout="smoke test OK",
+                    command=("python", "scripts/compose_smoke.py"),
+                )
+            ]
+        )
+        service = ReproductionService(
+            settings(tmp_path),
+            sandbox=sandbox,
+            cloner=FakeCloner(source),
+        )
+
+        outcome = await service.reproduce_runtime(
+            {
+                "run_id": "run-runtime-ok",
+                "repository": "owner/repo",
+                "repository_path": str(source),
+                "runtime_commands": [["python", "scripts/compose_smoke.py"]],
+            }
+        )
+
+        assert outcome.confirmed is False

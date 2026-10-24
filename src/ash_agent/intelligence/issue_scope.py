@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import ast
+import json
 import logging
 import re
+import shlex
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
@@ -75,6 +77,20 @@ class ScopeOutcome:
     reasoning: str
     scope_files: list[str] = field(default_factory=list)
     scope_symbols: list[str] = field(default_factory=list)
+    validation_mode: str = "pytest"
+    runtime_commands: list[list[str]] = field(default_factory=list)
+    runtime_expected_exit: int = 0
+    runtime_expected_output: str | None = None
+    runtime_description: str = ""
+
+
+@dataclass(frozen=True)
+class RuntimePlan:
+    commands: list[list[str]]
+    scope_files: list[str]
+    scope_symbols: list[str]
+    expected_output: str | None
+    description: str
 
 
 class IssueScopeService:
@@ -84,7 +100,10 @@ class IssueScopeService:
     async def determine(self, state: dict) -> ScopeOutcome:
         failed_tests = _failed_tests(state)
         explicit_files = _explicit_files(state)
+        runtime = _runtime_plan(state) if state.get("source") == "issue" else None
         if not failed_tests:
+            if runtime is not None:
+                return _runtime_outcome(runtime, [], "no pytest failures; runtime plan")
             return ScopeOutcome(
                 [],
                 [],
@@ -169,6 +188,13 @@ class IssueScopeService:
                 scope_symbols,
             )
 
+        if runtime is not None:
+            return _runtime_outcome(
+                runtime,
+                failed_tests,
+                "no issue-related pytest failure; runtime plan",
+            )
+
         return ScopeOutcome(
             [],
             failed_tests,
@@ -176,6 +202,181 @@ class IssueScopeService:
             scope_files,
             scope_symbols or _issue_symbols(state, scope_files),
         )
+
+
+def _runtime_outcome(
+    plan: RuntimePlan,
+    unrelated_tests: list[str],
+    reason: str,
+) -> ScopeOutcome:
+    return ScopeOutcome(
+        [],
+        unrelated_tests,
+        reason,
+        plan.scope_files,
+        plan.scope_symbols,
+        "command",
+        plan.commands,
+        0,
+        plan.expected_output,
+        plan.description,
+    )
+
+
+def _runtime_plan(state: dict) -> RuntimePlan | None:
+    text = _issue_text(state)
+    if _packaging_issue(text):
+        return None
+    commands = _runtime_commands(state, text)
+    if not commands:
+        return None
+
+    files = _explicit_files(state)
+    for command in commands:
+        script = _command_script(command)
+        if script and script not in files:
+            files.append(script)
+    files = _clean_paths(files) or _fallback_files(state)
+    if not files:
+        return None
+
+    return RuntimePlan(
+        commands=commands,
+        scope_files=files,
+        scope_symbols=_issue_symbols(state, files),
+        expected_output=_expected_output(text),
+        description="runtime command: " + " && ".join(" ".join(c) for c in commands),
+    )
+
+
+def _packaging_issue(text: str) -> bool:
+    lowered = text.lower()
+    return any(
+        marker in lowered
+        for marker in (
+            "pyproject.toml",
+            "console script",
+            "console entry point",
+            "entry point",
+            "wheel",
+            "packaging",
+            "build failure",
+            "install fail",
+            "not callable",
+        )
+    )
+
+
+def _runtime_commands(state: dict, text: str) -> list[list[str]]:
+    for snippet in _command_snippets(text):
+        for raw in snippet.splitlines():
+            line = raw.strip()
+            if not line:
+                continue
+            if "pytest" in line:
+                continue
+            if line.startswith(("docker compose", "docker-compose")):
+                service = _compose_service(line)
+                command = _compose_command(state, service)
+                if command:
+                    return [command]
+                continue
+            if line.startswith(
+                ("python ", "python3 ", "pytest ", "uv run ", "node ", "npm ", "bash ", "sh ")
+            ):
+                try:
+                    return [shlex.split(line)]
+                except ValueError:
+                    continue
+    return []
+
+
+def _command_snippets(text: str) -> list[str]:
+    fenced = re.findall(r"```[^\n]*\n(.*?)```", text, re.DOTALL)
+    inline = re.findall(r"`([^`\n]+)`", text)
+    return [*fenced, *inline]
+
+
+def _compose_service(command: str) -> str | None:
+    try:
+        tokens = shlex.split(command)
+    except ValueError:
+        return None
+    for index, token in enumerate(tokens):
+        if token != "run":
+            continue
+        for candidate in tokens[index + 1 :]:
+            if not candidate.startswith("-"):
+                return candidate
+    return None
+
+
+def _compose_command(state: dict, service: str | None) -> list[str] | None:
+    root = state.get("repository_path")
+    if not root:
+        return None
+    for name in _COMPOSE_FILES:
+        path = Path(str(root)) / name
+        if not path.is_file():
+            continue
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            continue
+        current = None
+        for line in lines:
+            service_match = re.match(r"^\s{2}([\w.-]+):\s*$", line)
+            if service_match:
+                current = service_match.group(1)
+                continue
+            if service and current != service:
+                continue
+            command_match = re.match(r"^\s+command:\s*(.+?)\s*$", line)
+            if command_match:
+                return _parse_command_value(command_match.group(1))
+    return None
+
+
+def _parse_command_value(value: str) -> list[str] | None:
+    if value.startswith("["):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return None
+        if isinstance(parsed, list) and parsed:
+            return [str(part) for part in parsed]
+        return None
+    try:
+        return shlex.split(value)
+    except ValueError:
+        return None
+
+
+def _command_script(command: list[str]) -> str | None:
+    for token in command:
+        if token.endswith((".py", ".sh")) and not token.startswith("-"):
+            return token
+    return None
+
+
+def _expected_output(text: str) -> str | None:
+    patterns = (
+        r"expected\s+(?:output|stdout|result)s?\s*:\s*`([^`]+)`",
+        r"expected\s+(?:output|stdout|result)s?\s*:\s*\"([^\"]+)\"",
+        r"should\s+(?:print|output)\s+`([^`]+)`",
+        r"should\s+(?:print|output)\s+\"([^\"]+)\"",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if not match:
+            continue
+        value = match.group(1).strip()
+        if not value or value.startswith(("python", "uv ", "docker", "pytest")):
+            continue
+        if "/" in value or value.endswith((".py", ".yml", ".yaml", ".toml")):
+            continue
+        return value
+    return None
 
 
 def _failed_tests(state: dict) -> list[str]:

@@ -94,7 +94,9 @@ restart it.
 The worker executes a LangGraph state machine for every run:
 
 ```text
-ingest → diagnose → retrieve → reproduce → scope → plan → patch → validate
+ingest → diagnose → retrieve → reproduce → scope
+                                              ├─ pytest targets → plan → patch → validate
+                                              └─ runtime command → runtime → plan → patch → validate
                                                          ├─ passed            → publish   (passed)
                                                          ├─ failed, budget    → reflect → plan
                                                          └─ budget exhausted → escalate  (escalated)
@@ -205,6 +207,23 @@ exactly the baseline unrelated set. The PR body lists target tests and untouched
 
 Repair attempts stop when the target tests pass; unrelated bugs remain for separate issues/PRs.
 
+### Runtime-only issues
+
+Some issues have no pytest coverage: a script crashes, a CLI prints the wrong value, or a Compose
+service fails. When no issue-related failing test exists, the `scope` node extracts a runtime
+command from the issue and, for Compose issues, from the service's `command` array. It records the
+expected exit code and, when the issue states it explicitly, the expected output.
+
+The `runtime` node runs that command in the same sandbox with network disabled, captures the
+failure, and routes to planning only if the runtime behavior is reproduced. Patch generation is
+still restricted to `scope_files`/`scope_symbols`; validation reruns the same command and checks
+exit code/output. Test files are never edited.
+
+The sandbox has no Docker socket, so a real `docker compose run` is not executed inside it. For a
+Compose issue, the agent runs the service's underlying command directly (for example
+`python scripts/compose_smoke.py`) and can additionally validate the Compose configuration. Install
+and packaging failures are out of scope and still escalate.
+
 ### Repair memory and pull requests
 
 Only a patch that passes focused and full validation is stored in `repair_lessons`. The next run
@@ -267,3 +286,4 @@ scripts also expect Neo4j/Qdrant and the sandbox Docker image.
 - Phase 4: isolated Docker reproduction, dependency install, pytest evidence — complete
 - Phase 5: LLM patch generation, focused/full validation, bounded self-correction — complete
 - Phase 6: verified repair memory, GitHub pull requests, audit fields and metrics — complete
+- Phase 7: runtime-only reproduction and command validation for issues without pytest coverage — complete

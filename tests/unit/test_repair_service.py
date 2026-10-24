@@ -271,6 +271,69 @@ class TestValidation:
         assert outcome.passed is False
         assert outcome.test_results["new_failures"] == ["tests/test_new.py::test_new"]
 
+    async def test_runtime_command_validation(self, tmp_path: Path) -> None:
+        root = repo(tmp_path)
+        (root / "scripts").mkdir()
+        (root / "scripts" / "smoke.py").write_text("print('ok')\n")
+        sandbox = FakeSandbox([result(0, "smoke test OK\n")])
+        service = RepairService(
+            settings(tmp_path),
+            FakeLLM(PatchProposal(summary="x", edits=[])),
+            sandbox=sandbox,
+        )
+        patch_state = state(root)
+        patch_state["patch_workspace"] = str(root)
+        patch_state["validation_mode"] = "command"
+        patch_state["runtime_commands"] = [["python", "scripts/smoke.py"]]
+        patch_state["runtime_expected_exit"] = 0
+
+        outcome = await service.validate(patch_state)
+
+        assert outcome.passed is True
+        assert outcome.test_results["mode"] == "command"
+        assert outcome.test_results["results"][0]["exit_code"] == 0
+
+    async def test_runtime_command_failure(self, tmp_path: Path) -> None:
+        root = repo(tmp_path)
+        (root / "scripts").mkdir()
+        (root / "scripts" / "smoke.py").write_text("print(message)\n")
+        sandbox = FakeSandbox([result(1, "NameError: name 'message' is not defined\n")])
+        service = RepairService(
+            settings(tmp_path),
+            FakeLLM(PatchProposal(summary="x", edits=[])),
+            sandbox=sandbox,
+        )
+        patch_state = state(root)
+        patch_state["patch_workspace"] = str(root)
+        patch_state["validation_mode"] = "command"
+        patch_state["runtime_commands"] = [["python", "scripts/smoke.py"]]
+
+        outcome = await service.validate(patch_state)
+
+        assert outcome.passed is False
+        assert outcome.test_results["results"][0]["exit_code"] == 1
+
+    async def test_runtime_output_mismatch_fails(self, tmp_path: Path) -> None:
+        root = repo(tmp_path)
+        (root / "scripts").mkdir()
+        (root / "scripts" / "smoke.py").write_text("print('wrong')\n")
+        sandbox = FakeSandbox([result(0, "wrong\n")])
+        service = RepairService(
+            settings(tmp_path),
+            FakeLLM(PatchProposal(summary="x", edits=[])),
+            sandbox=sandbox,
+        )
+        patch_state = state(root)
+        patch_state["patch_workspace"] = str(root)
+        patch_state["validation_mode"] = "command"
+        patch_state["runtime_commands"] = [["python", "scripts/smoke.py"]]
+        patch_state["runtime_expected_output"] = "42"
+
+        outcome = await service.validate(patch_state)
+
+        assert outcome.passed is False
+        assert outcome.test_results["expected_output"] == "42"
+
 
 class TestPrompt:
     def test_includes_failure_logs_and_lessons(self, tmp_path: Path) -> None:

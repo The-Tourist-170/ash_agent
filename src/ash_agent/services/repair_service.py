@@ -17,6 +17,8 @@ from ash_agent.intelligence.patch_scope import (
 from ash_agent.intelligence.patching import PatchProposal, apply_edits
 from ash_agent.sandbox.docker_manager import CommandResult, DockerSandbox
 from ash_agent.sandbox.executor import (
+    _runtime_matches,
+    _runtime_payload,
     install_commands,
     parse_pytest,
     prepare_workspace,
@@ -125,6 +127,9 @@ class RepairService:
             return _failed_validation("patch workspace is missing", state)
 
         workspace = Path(workspace_path)
+        if state.get("validation_mode") == "command":
+            return await self._validate_runtime(state, workspace)
+
         install_results = []
         for command in install_commands(workspace, self.policy):
             result = await self.sandbox.run(
@@ -238,6 +243,49 @@ class RepairService:
             ref=state.get("ref"),
         )
 
+    async def _validate_runtime(self, state: dict, workspace: Path) -> ValidationOutcome:
+        commands = state.get("runtime_commands") or []
+        if not commands:
+            return _failed_validation("runtime plan has no commands", state)
+
+        expected_exit = int(state.get("runtime_expected_exit") or 0)
+        expected_output = state.get("runtime_expected_output")
+        results: list[CommandResult] = []
+        for command in commands:
+            results.append(
+                await self.sandbox.run(
+                    [str(part) for part in command],
+                    workspace,
+                    network=self.policy.network,
+                    timeout_seconds=self.policy.timeout_seconds,
+                )
+            )
+
+        passed = all(_runtime_matches(result, expected_exit, expected_output) for result in results)
+        logger.info(
+            "runtime validation for %s attempt %s: passed=%s commands=%s",
+            state.get("run_id"),
+            state.get("attempt", 0),
+            passed,
+            [" ".join(result.command) for result in results],
+        )
+        sections = []
+        for result in results:
+            sections.append(f"=== runtime: {' '.join(result.command)} ===")
+            sections.append(result.output.strip())
+        return ValidationOutcome(
+            passed=passed,
+            test_results={
+                "passed": passed,
+                "attempt": state.get("attempt", 0),
+                "mode": "command",
+                "expected_exit": expected_exit,
+                "expected_output": expected_output,
+                "results": [_runtime_payload(result) for result in results],
+            },
+            logs="\n".join(section for section in sections if section)[:50_000],
+        )
+
 
 def cleanup_workspace(path: str | Path | None) -> None:
     if path:
@@ -341,6 +389,19 @@ def build_patch_prompt(state: dict, source_root: Path | None = None) -> str:
         sections.append(
             "Allowed symbols (DO NOT edit other functions/classes):\n"
             + "\n".join(f"- {symbol}" for symbol in allowed_symbols)
+        )
+
+    if state.get("validation_mode") == "command":
+        commands = state.get("runtime_commands") or []
+        sections.append(
+            "Runtime validation (no pytest coverage):\n"
+            + "\n".join(f"- {' '.join(command)}" for command in commands)
+        )
+        expected_output = state.get("runtime_expected_output")
+        if expected_output:
+            sections.append(f"Expected runtime output:\n{expected_output}")
+        sections.append(
+            "Fix the runtime behavior reported by the issue. Do not fix unrelated pytest failures."
         )
 
     failure_logs = str(state.get("failure_logs") or "")

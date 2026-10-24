@@ -191,6 +191,10 @@ class GitHubPullRequestService:
         full = state.get("test_results") or {}
         focused = full.get("focused") or {}
         full_result = full.get("full") or {}
+        runtime_mode = state.get("validation_mode") == "command"
+        root_cause = state.get("root_cause")
+        if runtime_mode:
+            root_cause = state.get("patch_summary") or root_cause
         target_tests = state.get("target_tests") or []
         unrelated_tests = state.get("unrelated_failed_tests") or []
         scope_lines = "\n".join(f"- `{test}`" for test in target_tests) or "- n/a"
@@ -199,9 +203,23 @@ class GitHubPullRequestService:
         )
         issue_number = state.get("issue_number")
         fixes = f"Fixes #{issue_number}\n\n" if issue_number else ""
+        runtime_section = ""
+        if state.get("validation_mode") == "command":
+            commands = state.get("runtime_commands") or []
+            runtime = state.get("runtime_validation") or {}
+            runtime_lines = "\n".join(f"- `{' '.join(command)}`" for command in commands)
+            runtime_section = f"""
+## Runtime validation
+
+{runtime_lines}
+
+- passed: {runtime.get("passed", "n/a")}
+- expected exit: {runtime.get("expected_exit", 0)}
+- expected output: {runtime.get("expected_output") or "not specified"}
+"""
         return f"""{fixes}## Root cause
 
-{state.get("root_cause") or "Not available"}
+{root_cause or "Not available"}
 
 ## Issue scope
 
@@ -211,6 +229,7 @@ Target failing tests:
 Pre-existing unrelated failures left untouched:
 {unrelated_lines}
 
+{runtime_section}
 ## Patch
 
 {state.get("patch_summary") or "See diff below."}

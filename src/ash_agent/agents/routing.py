@@ -4,11 +4,23 @@ from ash_agent.agents.state import AgentState
 
 
 def route_after_reproduce(state: AgentState) -> Literal["scope", "escalate"]:
-    return "scope" if state.get("reproduction_confirmed") else "escalate"
+    if state.get("reproduction_confirmed"):
+        return "scope"
+    if state.get("source") == "issue":
+        return "scope"
+    return "escalate"
 
 
-def route_after_scope(state: AgentState) -> Literal["plan", "escalate"]:
-    return "escalate" if state.get("scope_error") else "plan"
+def route_after_scope(state: AgentState) -> Literal["runtime", "plan", "escalate"]:
+    if state.get("scope_error"):
+        return "escalate"
+    if state.get("validation_mode") == "command":
+        return "runtime"
+    return "plan"
+
+
+def route_after_runtime(state: AgentState) -> Literal["plan", "escalate"]:
+    return "plan" if state.get("reproduction_confirmed") else "escalate"
 
 
 def route_after_validation(

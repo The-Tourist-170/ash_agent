@@ -23,6 +23,11 @@ async def scope(state: AgentState) -> dict:
         "unrelated_failed_tests": [],
         "scope_files": [path for path in suspected if not path.startswith("tests/")],
         "scope_symbols": [],
+        "validation_mode": "pytest",
+        "runtime_commands": [],
+        "runtime_expected_exit": 0,
+        "runtime_expected_output": None,
+        "runtime_description": "",
         "scope_reasoning": "mock scope: all failing tests",
         "scope_error": None,
         "status": "patching",
@@ -43,6 +48,11 @@ def make_scope_node(service: ScopeBackend | None):
                 "unrelated_failed_tests": [],
                 "scope_files": [],
                 "scope_symbols": [],
+                "validation_mode": "pytest",
+                "runtime_commands": [],
+                "runtime_expected_exit": 0,
+                "runtime_expected_output": None,
+                "runtime_description": "",
                 "scope_error": f"{type(exc).__name__}: {exc}"[:2000],
                 "scope_reasoning": "issue scoping failed",
                 "status": "patching",
@@ -53,11 +63,16 @@ def make_scope_node(service: ScopeBackend | None):
             "unrelated_failed_tests": outcome.unrelated_tests,
             "scope_files": outcome.scope_files,
             "scope_symbols": outcome.scope_symbols,
+            "validation_mode": outcome.validation_mode,
+            "runtime_commands": outcome.runtime_commands,
+            "runtime_expected_exit": outcome.runtime_expected_exit,
+            "runtime_expected_output": outcome.runtime_expected_output,
+            "runtime_description": outcome.runtime_description,
             "scope_reasoning": outcome.reasoning,
             "scope_error": None,
             "status": "patching",
         }
-        if not outcome.target_tests:
+        if not outcome.target_tests and outcome.validation_mode != "command":
             update["scope_error"] = "could not map the issue to a failing test"
         return update
 

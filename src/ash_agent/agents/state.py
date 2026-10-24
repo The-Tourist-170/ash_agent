@@ -22,6 +22,13 @@ class AgentState(TypedDict, total=False):
     unrelated_failed_tests: list[str]
     scope_files: list[str]
     scope_symbols: list[str]
+    validation_mode: str
+    runtime_commands: list[list[str]]
+    runtime_expected_exit: int
+    runtime_expected_output: str | None
+    runtime_description: str
+    runtime_reproduction: dict[str, object]
+    runtime_validation: dict[str, object]
     scope_reasoning: str
     scope_error: str | None
     plan: str | None

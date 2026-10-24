@@ -52,6 +52,14 @@ class ReproductionOutcome:
     backend: str
 
 
+@dataclass(frozen=True)
+class RuntimeOutcome:
+    confirmed: bool
+    logs: str
+    results: dict
+    backend: str
+
+
 class ReproductionService:
     def __init__(
         self,
@@ -110,6 +118,64 @@ class ReproductionService:
             result.test_results.get("failed"),
         )
         return result
+
+    async def reproduce_runtime(self, state: dict) -> RuntimeOutcome:
+        commands = state.get("runtime_commands") or []
+        if not commands:
+            return RuntimeOutcome(
+                confirmed=False,
+                logs="runtime plan has no commands",
+                results={"mode": "command", "error": "no commands"},
+                backend="docker",
+            )
+
+        checkout = await self._checkout(state)
+        workspace = Path(self.settings.sandbox_workspace_dir) / _safe_name(
+            str(state.get("run_id") or "run")
+        )
+        await asyncio.to_thread(prepare_workspace, checkout.path, workspace)
+        expected_exit = int(state.get("runtime_expected_exit") or 0)
+        expected_output = state.get("runtime_expected_output")
+        results: list[CommandResult] = []
+        try:
+            for command in commands:
+                results.append(
+                    await self.sandbox.run(
+                        [str(part) for part in command],
+                        workspace,
+                        network=self.policy.network,
+                        timeout_seconds=self.policy.timeout_seconds,
+                    )
+                )
+        finally:
+            if not self.policy.keep_workspace:
+                await asyncio.to_thread(shutil.rmtree, workspace, True)
+
+        confirmed = any(
+            not _runtime_matches(result, expected_exit, expected_output) for result in results
+        )
+        sections = []
+        for result in results:
+            sections.append(f"=== runtime: {' '.join(result.command)} ===")
+            sections.append(result.output.strip())
+        payload = {
+            "mode": "command",
+            "expected_exit": expected_exit,
+            "expected_output": expected_output,
+            "confirmed": confirmed,
+            "results": [_runtime_payload(result) for result in results],
+        }
+        logger.info(
+            "runtime reproduction: confirmed=%s commands=%s",
+            confirmed,
+            [" ".join(result.command) for result in results],
+        )
+        return RuntimeOutcome(
+            confirmed=confirmed,
+            logs="\n".join(section for section in sections if section)[:50_000],
+            results=payload,
+            backend="docker",
+        )
 
     async def _checkout(self, state: dict) -> Checkout:
         repository_path = state.get("repository_path")
@@ -243,6 +309,27 @@ def _build_outcome(
 
 def _safe_name(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9_.-]", "_", value).strip("._") or "run"
+
+
+def _runtime_matches(
+    result: CommandResult,
+    expected_exit: int,
+    expected_output: str | None,
+) -> bool:
+    if result.timed_out or result.exit_code != expected_exit:
+        return False
+    return not (expected_output and expected_output not in result.output)
+
+
+def _runtime_payload(result: CommandResult) -> dict:
+    return {
+        "command": " ".join(result.command),
+        "exit_code": result.exit_code,
+        "timed_out": result.timed_out,
+        "duration_seconds": round(result.duration_seconds, 2),
+        "stdout": result.stdout[-4000:],
+        "stderr": result.stderr[-4000:],
+    }
 
 
 def build_reproduction_service(settings: Settings) -> ReproductionService | None:

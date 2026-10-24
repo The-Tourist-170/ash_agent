@@ -54,10 +54,13 @@ def make_validate_node(
                 "status": "validating",
             }
 
-        return {
+        update = {
             "test_results": outcome.test_results,
             "validation_logs": outcome.logs[:20_000],
             "status": "validating",
         }
+        if outcome.test_results.get("mode") == "command":
+            update["runtime_validation"] = outcome.test_results
+        return update
 
     return validate_with_service

@@ -163,6 +163,32 @@ class TestPullRequestBody:
         assert "test_addition_returns_sum" in body
         assert "test_subtraction_returns_difference" in body
 
+    def test_runtime_mode_uses_scoped_patch_summary(self) -> None:
+        service = GitHubPullRequestService(token="token")
+
+        body = service._body(
+            {
+                "issue_number": 11,
+                "validation_mode": "command",
+                "root_cause": "unrelated multiply/divide tests are broken",
+                "patch_summary": "define the missing smoke message",
+                "runtime_commands": [["python", "scripts/compose_smoke.py"]],
+                "runtime_validation": {
+                    "passed": True,
+                    "expected_exit": 0,
+                    "expected_output": None,
+                },
+                "target_tests": [],
+                "unrelated_failed_tests": ["tests/test_calculator.py::test_multiply"],
+                "test_results": {},
+            }
+        )
+
+        assert "define the missing smoke message" in body
+        assert "unrelated multiply/divide" not in body
+        assert "## Runtime validation" in body
+        assert "python scripts/compose_smoke.py" in body
+
     def test_workflow_run_has_no_issue_link(self) -> None:
         service = GitHubPullRequestService(token="token")
 

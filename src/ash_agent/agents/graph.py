@@ -8,12 +8,17 @@ from ash_agent.agents.nodes.patch import RepairBackend, make_patch_node
 from ash_agent.agents.nodes.plan import plan
 from ash_agent.agents.nodes.publish import PublishBackend, make_publish_node
 from ash_agent.agents.nodes.reflect import reflect
-from ash_agent.agents.nodes.reproduce import ReproductionBackend, make_reproduce_node
+from ash_agent.agents.nodes.reproduce import (
+    ReproductionBackend,
+    make_reproduce_node,
+    make_runtime_reproduce_node,
+)
 from ash_agent.agents.nodes.retrieve import RetrievalBackend, make_retrieve_node
 from ash_agent.agents.nodes.scope import ScopeBackend, make_scope_node
 from ash_agent.agents.nodes.validate import make_validate_node
 from ash_agent.agents.routing import (
     route_after_reproduce,
+    route_after_runtime,
     route_after_scope,
     route_after_validation,
 )
@@ -36,6 +41,7 @@ def build_graph(
     diagnose_node = make_llm_diagnose_node(llm_client) if llm_client else diagnose
     retrieve_node = make_retrieve_node(retrieval_service)
     reproduce_node = make_reproduce_node(reproduction_service)
+    runtime_node = make_runtime_reproduce_node(reproduction_service)
     scope_node = make_scope_node(scope_service)
     patch_node = make_patch_node(repair_service)
     validate_node = make_validate_node(success_on_attempt, repair_service)
@@ -46,6 +52,7 @@ def build_graph(
     builder.add_node("retrieve", retrieve_node)
     builder.add_node("reproduce", reproduce_node)
     builder.add_node("scope", scope_node)
+    builder.add_node("runtime", runtime_node)
     builder.add_node("plan", plan)
     builder.add_node("patch", patch_node)
     builder.add_node("validate", validate_node)
@@ -59,6 +66,7 @@ def build_graph(
     builder.add_edge("retrieve", "reproduce")
     builder.add_conditional_edges("reproduce", route_after_reproduce)
     builder.add_conditional_edges("scope", route_after_scope)
+    builder.add_conditional_edges("runtime", route_after_runtime)
     builder.add_edge("plan", "patch")
     builder.add_edge("patch", "validate")
     builder.add_conditional_edges("validate", route_after_validation)

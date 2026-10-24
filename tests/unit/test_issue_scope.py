@@ -93,6 +93,12 @@ class TestIssueScopeService:
         (repo / "scripts").mkdir(parents=True)
         (repo / "src" / "calculator_bug_lab").mkdir(parents=True)
         (repo / "scripts" / "compose_smoke.py").write_text("def main():\n    print(message)\n")
+        (repo / "docker-compose.yml").write_text(
+            "services:\n"
+            "  calculator-smoke:\n"
+            "    image: python:3.12-slim\n"
+            '    command: ["python", "scripts/compose_smoke.py"]\n'
+        )
         (repo / "src" / "calculator_bug_lab" / "__init__.py").write_text(
             "def add(a, b):\n    return a - b\n"
             "def multiply(a, b):\n    return a + b\n"
@@ -103,7 +109,8 @@ class TestIssueScopeService:
             "issue_title": "[BUG] Docker Compose smoke service crashes with NameError",
             "issue_body": (
                 "The Compose smoke service exits with a NameError because "
-                "`scripts/compose_smoke.py` prints `message`, which is not defined."
+                "`scripts/compose_smoke.py` prints `message`, which is not defined.\n\n"
+                "Reproduction: run `docker compose run --rm calculator-smoke`."
             ),
             "repository_path": str(repo),
             "suspected_files": [
@@ -140,6 +147,9 @@ class TestIssueScopeService:
         outcome = await IssueScopeService(llm).determine(compose_state)
 
         assert outcome.target_tests == []
+        assert outcome.validation_mode == "command"
+        assert outcome.runtime_commands == [["python", "scripts/compose_smoke.py"]]
+        assert outcome.runtime_expected_output is None
         assert outcome.scope_files == [
             "scripts/compose_smoke.py",
             "docker-compose.yml",
@@ -148,3 +158,24 @@ class TestIssueScopeService:
             "compose.yaml",
         ]
         assert "src/calculator_bug_lab/__init__.py" not in outcome.scope_files
+
+    async def test_runtime_plan_extracts_expected_output(self, tmp_path) -> None:
+        repo = tmp_path / "repo"
+        (repo / "scripts").mkdir(parents=True)
+        (repo / "scripts" / "tool.py").write_text("print('wrong')\n")
+        runtime_state = {
+            "source": "issue",
+            "issue_title": "[BUG] Tool prints the wrong result",
+            "issue_body": ("Reproduction: run `python scripts/tool.py`.\n\nExpected output: `42`"),
+            "repository_path": str(repo),
+            "suspected_files": ["scripts/tool.py"],
+            "reproduction_results": {"failed_tests": []},
+            "retrieved_chunks": [],
+        }
+
+        outcome = await IssueScopeService(None).determine(runtime_state)
+
+        assert outcome.validation_mode == "command"
+        assert outcome.runtime_commands == [["python", "scripts/tool.py"]]
+        assert outcome.runtime_expected_output == "42"
+        assert outcome.scope_files == ["scripts/tool.py"]

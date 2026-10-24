@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import logging
 import os
 import re
@@ -131,12 +132,7 @@ class RepositoryService:
         return (await self._run_git(["rev-parse", revision], cwd=path)).strip()
 
     async def _run_git(self, arguments: list[str], cwd: Path | None = None) -> str:
-        environment = os.environ.copy()
-        environment["GIT_TERMINAL_PROMPT"] = "0"
-        if self.token:
-            environment["GIT_CONFIG_COUNT"] = "1"
-            environment["GIT_CONFIG_KEY_0"] = "http.extraHeader"
-            environment["GIT_CONFIG_VALUE_0"] = f"Authorization: Bearer {self.token}"
+        environment = self._git_environment()
 
         process = await asyncio.create_subprocess_exec(
             "git",
@@ -161,3 +157,13 @@ class RepositoryService:
             detail = stderr.decode("utf-8", errors="replace").strip()[-500:]
             raise RepositoryError(f"git {arguments[0]} failed: {detail}")
         return stdout.decode("utf-8", errors="replace")
+
+    def _git_environment(self) -> dict[str, str]:
+        environment = os.environ.copy()
+        environment["GIT_TERMINAL_PROMPT"] = "0"
+        if self.token:
+            credentials = base64.b64encode(f"x-access-token:{self.token}".encode()).decode()
+            environment["GIT_CONFIG_COUNT"] = "1"
+            environment["GIT_CONFIG_KEY_0"] = "http.extraHeader"
+            environment["GIT_CONFIG_VALUE_0"] = f"Authorization: Basic {credentials}"
+        return environment

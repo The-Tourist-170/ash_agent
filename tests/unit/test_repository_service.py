@@ -58,6 +58,21 @@ class TestRepositoryValidation:
 
 
 class TestRepositoryCheckout:
+    def test_token_uses_git_basic_auth(self, tmp_path: Path) -> None:
+        import base64
+
+        service = RepositoryService(
+            workspace_dir=tmp_path,
+            token="secret-token",
+        )
+
+        environment = service._git_environment()
+        header = environment["GIT_CONFIG_VALUE_0"]
+
+        assert header.startswith("Authorization: Basic ")
+        decoded = base64.b64decode(header.split()[-1]).decode()
+        assert decoded == "x-access-token:secret-token"
+
     async def test_clones_pinned_commit_and_reuses_checkout(
         self, remote_repository: tuple[Path, str, str], tmp_path: Path
     ) -> None:

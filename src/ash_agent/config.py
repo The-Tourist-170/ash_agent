@@ -57,6 +57,21 @@ class Settings(BaseSettings):
     retrieval_chunk_overlap: int = 10
     retrieval_max_files: int = 500
 
+    sandbox_enabled: bool = True
+    sandbox_image: str = "ash-agent-sandbox:py312"
+    sandbox_network: str = "none"
+    sandbox_install_network: str = "bridge"
+    sandbox_timeout_seconds: int = 120
+    sandbox_install_timeout_seconds: int = 180
+    sandbox_memory_limit: str = "512m"
+    sandbox_cpus: float = 1.0
+    sandbox_pids_limit: int = 128
+    sandbox_workspace_dir: str = ".ash_agent/sandboxes"
+    sandbox_keep_workspace: bool = False
+    sandbox_install_dependencies: bool = True
+    sandbox_test_args: str = "-q --disable-warnings --maxfail=5"
+    docker_binary: str = "docker"
+
     api_host: str = "0.0.0.0"
     api_port: int = 8000
 

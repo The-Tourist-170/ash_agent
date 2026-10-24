@@ -17,9 +17,10 @@ class AgentState(TypedDict, total=False):
     retrieval_backend: str | None
     root_cause: str | None
     reproduction_confirmed: bool
+    reproduction_results: dict[str, object]
     plan: str | None
     patch_diff: str | None
-    test_results: dict[str, bool | int | str]
+    test_results: dict[str, object]
     attempt: int
     max_attempts: int
     status: str

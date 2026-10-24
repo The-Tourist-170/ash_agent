@@ -13,6 +13,7 @@ from ash_agent.integrations import build_llm_client
 from ash_agent.persistence.checkpoints import open_checkpointer
 from ash_agent.persistence.models import Run, RunStatus
 from ash_agent.persistence.postgres import Database
+from ash_agent.sandbox.executor import build_reproduction_service
 from ash_agent.services.retrieval_service import build_retrieval_service
 
 logger = logging.getLogger(__name__)
@@ -39,6 +40,7 @@ def initial_state(run: Run) -> AgentState:
         "retrieval_backend": None,
         "root_cause": None,
         "reproduction_confirmed": False,
+        "reproduction_results": {},
         "plan": None,
         "patch_diff": None,
         "test_results": {},
@@ -74,17 +76,20 @@ async def _process_run(run_id: str) -> None:
         async with open_checkpointer(settings) as saver:
             llm_client = build_llm_client(settings)
             retrieval_service = build_retrieval_service(settings)
+            reproduction_service = build_reproduction_service(settings)
             graph = build_graph(
                 success_on_attempt=settings.mock_repair_success_attempt,
                 checkpointer=saver,
                 llm_client=llm_client,
                 retrieval_service=retrieval_service,
+                reproduction_service=reproduction_service,
             )
             logger.info(
-                "run %s using %s diagnosis and %s retrieval",
+                "run %s using %s diagnosis, %s retrieval and %s reproduction",
                 run_id,
                 "LLM" if llm_client is not None else "mock",
                 "repository" if retrieval_service is not None else "mock",
+                "sandbox" if reproduction_service is not None else "mock",
             )
             config = {
                 "configurable": {"thread_id": run_id},

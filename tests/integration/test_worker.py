@@ -31,6 +31,7 @@ def run_worker_burst() -> subprocess.CompletedProcess[str]:
             "LLM_BASE_URL": "",
             "LLM_MODEL": "",
             "RETRIEVAL_ENABLED": "false",
+            "SANDBOX_ENABLED": "false",
         }
     )
     worker_class = "rq.worker.SimpleWorker" if sys.platform == "darwin" else "rq.worker.Worker"

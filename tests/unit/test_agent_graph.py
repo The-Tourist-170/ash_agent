@@ -2,6 +2,7 @@ import pytest
 
 from ash_agent.agents.graph import build_graph
 from ash_agent.integrations.llm import Diagnosis
+from ash_agent.sandbox.executor import ReproductionOutcome
 from ash_agent.services.retrieval_service import RetrievalOutcome
 
 
@@ -52,6 +53,16 @@ class FakeRetrieval:
             ],
             backend="hybrid",
             graph_indexed=True,
+        )
+
+
+class FailingReproduction:
+    async def reproduce(self, state) -> ReproductionOutcome:
+        return ReproductionOutcome(
+            confirmed=False,
+            logs="could not collect tests",
+            test_results={"exit_code": 4, "errors": 1},
+            backend="docker",
         )
 
 
@@ -122,3 +133,11 @@ class TestAgentGraph:
         assert result["retrieval_backend"] == "hybrid"
         assert result["retrieved_chunks"][0]["path"] == "calculator.py"
         assert result["status"] == "passed"
+
+    async def test_graph_escalates_when_reproduction_fails(self) -> None:
+        result = await build_graph(reproduction_service=FailingReproduction()).ainvoke(base_state())
+
+        assert result["reproduction_confirmed"] is False
+        assert result["reproduction_results"]["exit_code"] == 4
+        assert result["status"] == "escalated"
+        assert "could not reproduce" in result["last_error"]

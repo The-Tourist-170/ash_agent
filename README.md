@@ -16,6 +16,7 @@ the LangGraph diagnosis/repair loop and open an annotated pull request.
 | Neo4j | Code relationship graph (Phase 3) |
 | Qdrant | Semantic code/log retrieval (Phase 3) |
 | FastEmbed | Local code-chunk embeddings |
+| Docker sandbox | Disposable test reproduction (Phase 4) |
 | Mem0 | Verified repair lessons (Phase 6) |
 
 ## Quick start
@@ -98,8 +99,9 @@ ingest → diagnose → retrieve → reproduce → plan → patch → validate
                                                        └─ budget exhausted → escalate  (escalated)
 ```
 
-Diagnosis uses `ChatOpenAI`; retrieval clones and indexes the repository; patching and validation
-remain deterministic mocks until Phase 5.
+Diagnosis uses `ChatOpenAI`; retrieval clones and indexes the repository; reproduction runs
+`pytest` in a disposable Docker sandbox; patching and validation remain deterministic mocks until
+Phase 5.
 
 Checkpoints use `AsyncPostgresSaver`, so the graph state is written to PostgreSQL after every
 node. A worker restart or RQ retry re-invokes the graph with the same `thread_id` (the run id)
@@ -119,6 +121,11 @@ and resumes from the last completed node. The worker creates the checkpoint sche
 | `NEO4J_URI` | `bolt://localhost:7687` | Code graph database |
 | `QDRANT_URL` | `http://localhost:6333` | Vector store |
 | `EMBEDDING_PROVIDER` | `fastembed` | `fastembed` or deterministic `hash` (tests) |
+| `SANDBOX_ENABLED` | `true` | Run tests in the Docker sandbox |
+| `SANDBOX_IMAGE` | `ash-agent-sandbox:py312` | Sandbox image |
+| `SANDBOX_NETWORK` | `none` | Test-container network |
+| `SANDBOX_TIMEOUT_SECONDS` | 120 | Test execution timeout |
+| `SANDBOX_MEMORY_LIMIT` | `512m` | Container memory cap |
 
 ### LLM diagnosis
 
@@ -155,6 +162,31 @@ uv run python scripts/index_repository.py --query "calculate_total tax discount"
 Expected: checkout path, resolved commit SHA, `backend: hybrid`, `core.py` / `calculate_total`
 among the top chunks, Neo4j node/edge counts, and a Qdrant point count.
 
+### Sandbox reproduction
+
+Build the local sandbox image once:
+
+```bash
+docker build -t ash-agent-sandbox:py312 infra/sandbox
+```
+
+The `reproduce` node copies the checkout into `.ash_agent/sandboxes/<run>`, installs dependencies
+from `uv.lock` / `requirements.txt` (network bridge), then runs `pytest` in a second container with
+`--network none`. Both containers run as the host UID, with a read-only root filesystem, dropped
+capabilities, `no-new-privileges`, memory/CPU/PID limits and a timeout. No host environment
+variables, secrets, or Docker socket are mounted.
+
+`reproduction_results` stores the install/test commands, exit codes, counts and failed test IDs;
+`failure_logs` stores the captured output. A pytest exit code of 1 confirms reproduction. Install
+failure, timeout, or no collected tests routes the run to `escalate`.
+
+```bash
+uv run python scripts/reproduce_repository.py
+```
+
+Expected for `dummy_project`: `confirmed: true`, `exit_code: 1`, `3 failed`, `3 passed`, and the
+three failing test names. Set `SANDBOX_ENABLED=false` to use the deterministic mock.
+
 On macOS the worker uses RQ's `SimpleWorker` (jobs run in-process) because RQ's forked child can
 hit Objective-C fork-safety crashes; Linux keeps the standard forked `Worker`. The worker also
 runs RQ's scheduler in-process so retries are dequeued.
@@ -168,12 +200,13 @@ uv run pytest
 ```
 
 Integration tests expect Postgres (`ash_agent_test` database) and Valkey on their default
-ports. Override with `TEST_DATABASE_URL` and `TEST_VALKEY_URL`. The live retrieval script also
-expects Neo4j and Qdrant from `infra/compose.yaml`.
+ports. Override with `TEST_DATABASE_URL` and `TEST_VALKEY_URL`. The live retrieval and reproduction
+scripts also expect Neo4j/Qdrant and the sandbox Docker image.
 
 ## Status
 
 - Phase 1: foundation, infrastructure, webhook gateway, RQ worker — complete
 - Phase 2: LangGraph workflow, PostgreSQL checkpoints, bounded retries and resumption — complete
 - Phase 3: repository cloning, Tree-sitter symbols, Neo4j graph, Qdrant hybrid retrieval — complete
-- Phase 4 onward: see `NOTES.md`
+- Phase 4: isolated Docker reproduction, dependency install, pytest evidence — complete
+- Phase 5 onward: see `NOTES.md`

@@ -197,9 +197,11 @@ three failing test names. Set `SANDBOX_ENABLED=false` to use the deterministic m
 
 Issue-triggered runs add a `scope` node between reproduction and planning. An LLM selects only the
 failing tests that directly prove the reported issue; unrelated pre-existing failures are recorded
-but not patched. Validation requires the target tests to pass and introduces no new failures.
-A full-suite exit code of 1 is accepted when the remaining failures are exactly the baseline
-unrelated set. The PR body lists target tests and untouched unrelated tests.
+but not patched. Scope also records the only source/config files and symbols that may be edited.
+Tests without issue evidence are dropped, and patch edits outside those files/symbols are rejected
+before validation. Test files are never edited. Validation requires the target tests to pass and
+introduces no new failures. A full-suite exit code of 1 is accepted when the remaining failures are
+exactly the baseline unrelated set. The PR body lists target tests and untouched unrelated tests.
 
 Repair attempts stop when the target tests pass; unrelated bugs remain for separate issues/PRs.
 

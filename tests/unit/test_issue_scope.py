@@ -2,14 +2,27 @@ from ash_agent.intelligence.issue_scope import IssueScopeService, build_scope_se
 
 
 class FakeLLM:
-    def __init__(self, target_tests: list[str] | None = None, error: Exception | None = None):
+    def __init__(
+        self,
+        target_tests: list[str] | None = None,
+        error: Exception | None = None,
+        scope_files: list[str] | None = None,
+        scope_symbols: list[str] | None = None,
+    ):
         self.target_tests = target_tests or []
         self.error = error
+        self.scope_files = scope_files or []
+        self.scope_symbols = scope_symbols or []
 
     async def complete_structured(self, schema, system_prompt, user_prompt):
         if self.error:
             raise self.error
-        return schema(target_tests=self.target_tests, reasoning="test scope")
+        return schema(
+            target_tests=self.target_tests,
+            scope_files=self.scope_files,
+            scope_symbols=self.scope_symbols,
+            reasoning="test scope",
+        )
 
 
 def state(
@@ -74,3 +87,64 @@ class TestIssueScopeService:
 
     async def test_build_scope_service_requires_llm(self) -> None:
         assert build_scope_service(None) is None
+
+    async def test_rejects_llm_tests_unrelated_to_explicit_script(self, tmp_path) -> None:
+        repo = tmp_path / "repo"
+        (repo / "scripts").mkdir(parents=True)
+        (repo / "src" / "calculator_bug_lab").mkdir(parents=True)
+        (repo / "scripts" / "compose_smoke.py").write_text("def main():\n    print(message)\n")
+        (repo / "src" / "calculator_bug_lab" / "__init__.py").write_text(
+            "def add(a, b):\n    return a - b\n"
+            "def multiply(a, b):\n    return a + b\n"
+            "def divide(a, b):\n    return a // b\n"
+        )
+        compose_state = {
+            "source": "issue",
+            "issue_title": "[BUG] Docker Compose smoke service crashes with NameError",
+            "issue_body": (
+                "The Compose smoke service exits with a NameError because "
+                "`scripts/compose_smoke.py` prints `message`, which is not defined."
+            ),
+            "repository_path": str(repo),
+            "suspected_files": [
+                "scripts/compose_smoke.py",
+                "src/calculator_bug_lab/__init__.py",
+            ],
+            "reproduction_results": {
+                "failed_tests": [
+                    "tests/test_calculator.py::test_multiplication_returns_product",
+                    "tests/test_calculator.py::test_division_preserves_fractional_result",
+                ]
+            },
+            "retrieved_chunks": [
+                {
+                    "path": "tests/test_calculator.py",
+                    "content": (
+                        "def test_multiplication_returns_product():\n"
+                        "    assert multiply(4, 3) == 12\n\n"
+                        "def test_division_preserves_fractional_result():\n"
+                        "    assert divide(7, 2) == 3.5\n"
+                    ),
+                }
+            ],
+        }
+        llm = FakeLLM(
+            target_tests=[
+                "tests/test_calculator.py::test_multiplication_returns_product",
+                "tests/test_calculator.py::test_division_preserves_fractional_result",
+            ],
+            scope_files=["src/calculator_bug_lab/__init__.py"],
+            scope_symbols=["multiply", "divide"],
+        )
+
+        outcome = await IssueScopeService(llm).determine(compose_state)
+
+        assert outcome.target_tests == []
+        assert outcome.scope_files == [
+            "scripts/compose_smoke.py",
+            "docker-compose.yml",
+            "docker-compose.yaml",
+            "compose.yml",
+            "compose.yaml",
+        ]
+        assert "src/calculator_bug_lab/__init__.py" not in outcome.scope_files

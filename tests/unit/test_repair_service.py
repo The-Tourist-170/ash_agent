@@ -1,8 +1,10 @@
 from pathlib import Path
 
+import pytest
 from pydantic import BaseModel
 
 from ash_agent.config import Settings
+from ash_agent.intelligence.patch_scope import ScopeViolation
 from ash_agent.intelligence.patching import PatchEdit, PatchProposal
 from ash_agent.sandbox.docker_manager import CommandResult
 from ash_agent.services.repair_service import (
@@ -137,6 +139,34 @@ class TestPatchGeneration:
         assert "--- a/src/demo/core.py" in outcome.diff
         assert "Exact file contents" in llm.prompts[0]
         assert "tests/test_core.py::test_total" in llm.prompts[0]
+
+    async def test_rejects_unrelated_symbol_before_applying(self, tmp_path: Path) -> None:
+        root = repo(tmp_path)
+        core = root / "src" / "demo" / "core.py"
+        core.write_text(core.read_text() + "\n\ndef unrelated(value):\n    return value\n")
+        proposal = PatchProposal(
+            summary="fix unrelated helper",
+            edits=[
+                PatchEdit(
+                    path="src/demo/core.py",
+                    old_text="def unrelated(value):\n    return value",
+                    new_text="def unrelated(value):\n    return value + 1",
+                    reason="unrelated cleanup",
+                )
+            ],
+        )
+        service = RepairService(
+            settings(tmp_path),
+            FakeLLM(proposal),
+            sandbox=FakeSandbox([]),
+            cloner=FakeCloner(root),
+        )
+        patch_state = state(root)
+        patch_state["scope_files"] = ["src/demo/core.py"]
+        patch_state["scope_symbols"] = ["total"]
+
+        with pytest.raises(ScopeViolation, match="allowed symbols"):
+            await service.generate_patch(patch_state)
 
 
 class TestValidation:

@@ -9,6 +9,11 @@ from pathlib import Path
 
 from ash_agent.config import Settings
 from ash_agent.integrations.llm import StructuredLLM
+from ash_agent.intelligence.patch_scope import (
+    ScopeViolation,
+    audit_patch_scope,
+    scope_files_for_state,
+)
 from ash_agent.intelligence.patching import PatchProposal, apply_edits
 from ash_agent.sandbox.docker_manager import CommandResult, DockerSandbox
 from ash_agent.sandbox.executor import (
@@ -25,7 +30,8 @@ SYSTEM_PROMPT = (
     "You are a senior software engineer repairing a Python repository. "
     "Return a minimal set of exact search/replace edits. old_text must be copied verbatim "
     "from the provided file content and must occur exactly once. Keep the existing style. "
-    "Do not edit tests unless the test itself is provably wrong."
+    "Only edit files and symbols listed in Allowed scope. Never edit tests and never fix "
+    "failing tests that are not issue-scoped targets."
 )
 
 
@@ -85,6 +91,17 @@ class RepairService:
         )
         if not isinstance(proposal, PatchProposal):
             proposal = PatchProposal.model_validate(proposal)
+
+        allowed_files = _scope_files(state)
+        allowed_symbols = [str(symbol) for symbol in state.get("scope_symbols") or []]
+        violations = audit_patch_scope(
+            proposal.edits,
+            checkout.path,
+            allowed_files,
+            allowed_symbols,
+        )
+        if violations:
+            raise ScopeViolation("patch rejected by scope guard: " + "; ".join(violations))
 
         applied = await asyncio.to_thread(apply_edits, workspace, proposal)
         logger.info(
@@ -245,6 +262,10 @@ def _target_tests(state: dict) -> list[str]:
     return _failed_tests(state)
 
 
+def _scope_files(state: dict) -> list[str]:
+    return scope_files_for_state(state)
+
+
 def _unrelated_tests(state: dict, target_tests: list[str]) -> list[str]:
     unrelated = state.get("unrelated_failed_tests")
     if isinstance(unrelated, list) and unrelated:
@@ -309,6 +330,19 @@ def build_patch_prompt(state: dict, source_root: Path | None = None) -> str:
             + "\n".join(f"- {test}" for test in unrelated_tests)
         )
 
+    allowed_files = _scope_files(state)
+    if allowed_files:
+        sections.append(
+            "Allowed files (DO NOT edit anything else):\n"
+            + "\n".join(f"- {path}" for path in allowed_files)
+        )
+    allowed_symbols = [str(symbol) for symbol in state.get("scope_symbols") or []]
+    if allowed_symbols:
+        sections.append(
+            "Allowed symbols (DO NOT edit other functions/classes):\n"
+            + "\n".join(f"- {symbol}" for symbol in allowed_symbols)
+        )
+
     failure_logs = str(state.get("failure_logs") or "")
     if failure_logs:
         sections.append("Failure logs:\n" + failure_logs[:5000])
@@ -350,9 +384,11 @@ def build_patch_prompt(state: dict, source_root: Path | None = None) -> str:
             sections.append("Verified lessons for this repository:\n" + "\n".join(rendered))
 
     sections.append(
-        "Fix only the issue-scoped tests. Do not change unrelated functions or fix unrelated "
-        "pre-existing failures, even if they appear in the logs. Return exact old_text/new_text "
-        "edits and copy old_text from the file contents, including indentation."
+        "Fix only the issue-scoped tests and the reported issue. Do not change unrelated "
+        "functions, tests, or fix unrelated pre-existing failures, even if they appear in the "
+        "logs. Every edit must be inside Allowed files and Allowed symbols. Before returning, "
+        "self-check that no other file, function, or line was touched. Return exact "
+        "old_text/new_text edits and copy old_text from the file contents, including indentation."
     )
     return "\n\n".join(section for section in sections if section)[:40_000]
 

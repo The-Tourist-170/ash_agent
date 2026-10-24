@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
 from ash_agent.agents.state import AgentState
+from ash_agent.intelligence.patch_scope import audit_patch_scope, scope_files_for_state
 
 if TYPE_CHECKING:
     from ash_agent.services.pull_request_service import PullRequestResult
@@ -24,6 +26,23 @@ async def publish(state: AgentState) -> dict:
 
 def make_publish_node(service: PublishBackend | None):
     async def publish_with_service(state: AgentState) -> dict:
+        root = state.get("repository_path")
+        edits = state.get("patch_edits") or []
+        if root and edits:
+            violations = audit_patch_scope(
+                edits,
+                Path(root),
+                scope_files_for_state(state),
+                [str(symbol) for symbol in state.get("scope_symbols") or []],
+            )
+            if violations:
+                logger.warning("publish blocked by scope guard: %s", "; ".join(violations))
+                return {
+                    "status": "escalated",
+                    "last_error": ("patch scope violation: " + "; ".join(violations))[:2000],
+                    "publish_status": "blocked_scope",
+                }
+
         if service is None:
             return {
                 "status": "passed",

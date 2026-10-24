@@ -47,6 +47,8 @@ def initial_state(run: Run, prior_lessons: list[dict] | None = None) -> AgentSta
         "reproduction_results": {},
         "target_tests": [],
         "unrelated_failed_tests": [],
+        "scope_files": [],
+        "scope_symbols": [],
         "scope_reasoning": "",
         "scope_error": None,
         "plan": None,

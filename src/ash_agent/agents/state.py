@@ -20,6 +20,8 @@ class AgentState(TypedDict, total=False):
     reproduction_results: dict[str, object]
     target_tests: list[str]
     unrelated_failed_tests: list[str]
+    scope_files: list[str]
+    scope_symbols: list[str]
     scope_reasoning: str
     scope_error: str | None
     plan: str | None
